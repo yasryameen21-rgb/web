@@ -7,6 +7,7 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import SignUp from "./pages/SignUp";
 import Welcome from "./pages/Welcome";
+import page from "./pages/page";
 
 function Router() {
   return (
@@ -15,6 +16,7 @@ function Router() {
       <Route path={"/signup"} component={SignUp} />
       <Route path={"/welcome"} component={Welcome} />
       <Route path={"/404"} component={NotFound} />
+      <Route path="/page" component={page} />
       {/* Final fallback route */}
       <Route component={NotFound} />
     </Switch>
