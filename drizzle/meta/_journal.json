@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1776029714785,
+      "tag": "0000_abnormal_plazm",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1776029913508,
+      "tag": "0001_complete_quasar",
+      "breakpoints": true
+    }
+  ]
+}
