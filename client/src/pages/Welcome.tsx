@@ -126,7 +126,7 @@ export default function Welcome() {
         {/* زر الانتقال إلى التطبيق */}
         <div className="flex justify-center">
         <Button 
-  onClick={() => setLocation("/home")} 
+  onClick={() => setLocation("/page")} 
   className="bg-[#5c56d6] hover:bg-[#4a44b5] text-white px-8 py-2 rounded-lg"
 >
   ابدأ الآن
