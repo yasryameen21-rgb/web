@@ -50,6 +50,13 @@ export default function Home() {
             <p className="text-lg text-muted-foreground">
               تطبيق التواصل العائلي الآمن والموثوق
             </p>
+            <div className="mt-6 flex justify-center">
+              <img 
+                src="/home-child-security-realistic.png" 
+                alt="Yamen Chat Security" 
+                className="w-64 h-64 object-cover rounded-3xl shadow-2xl border-4 border-primary/30 glow-effect"
+              />
+            </div>
           </div>
 
           {/* بطاقة نموذج التسجيل */}

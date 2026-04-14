@@ -288,6 +288,9 @@ export default function SocialApp() {
   const [products, setProducts] = useState(initialProducts);
   const [searchValue, setSearchValue] = useState("");
   const [postText, setPostText] = useState("");
+  const [commentText, setCommentText] = useState<{ [key: number]: string }>({});
+  const [activeCommentId, setActiveCommentId] = useState<number | null>(null);
+  const [marketForm, setMarketForm] = useState({ name: "", price: "", store: "", city: "" });
   const [chatThreads, setChatThreads] = useState(initialChats);
   const [selectedChatId, setSelectedChatId] = useState(initialChats[0].id);
   const [chatMessage, setChatMessage] = useState("");
@@ -328,6 +331,37 @@ export default function SocialApp() {
     setPosts((current) =>
       current.map((post) => (post.id === postId ? { ...post, blocked: true } : post))
     );
+  };
+
+  const submitComment = (postId: number) => {
+    const text = commentText[postId];
+    if (!text?.trim()) return;
+    
+    setPosts((current) =>
+      current.map((post) =>
+        post.id === postId
+          ? { ...post, comments: post.comments + 1 }
+          : post
+      )
+    );
+    setCommentText({ ...commentText, [postId]: "" });
+    setActiveCommentId(null);
+  };
+
+  const handlePublishProduct = () => {
+    if (!marketForm.name || !marketForm.price) return;
+    
+    const newProduct: Product = {
+      id: Date.now(),
+      name: marketForm.name,
+      price: marketForm.price,
+      store: marketForm.store || "متجري",
+      city: marketForm.city || "غير محدد",
+      posted: "الآن",
+    };
+    
+    setProducts([newProduct, ...products]);
+    setMarketForm({ name: "", price: "", store: "", city: "" });
   };
 
   const submitPost = async () => {
@@ -546,10 +580,31 @@ export default function SocialApp() {
                     <Heart className={`w-4 h-4 ${post.liked ? "fill-current" : ""}`} />
                     {post.likes}
                   </Button>
-                  <Button type="button" variant="ghost" size="sm">
-                    <MessageCircle className="w-4 h-4" />
-                    {post.comments}
-                  </Button>
+                  <div className="relative">
+                    <Button 
+                      type="button" 
+                      variant={activeCommentId === post.id ? "secondary" : "ghost"} 
+                      size="sm"
+                      onClick={() => setActiveCommentId(activeCommentId === post.id ? null : post.id)}
+                    >
+                      <MessageCircle className="w-4 h-4" />
+                      {post.comments}
+                    </Button>
+                    {activeCommentId === post.id && (
+                      <div className="absolute bottom-full mb-2 right-0 w-64 p-2 bg-card border rounded-lg shadow-xl z-50 flex gap-2">
+                        <Input 
+                          size="sm" 
+                          placeholder="اكتب تعليقاً..." 
+                          value={commentText[post.id] || ""}
+                          onChange={(e) => setCommentText({...commentText, [post.id]: e.target.value})}
+                          onKeyDown={(e) => e.key === 'Enter' && submitComment(post.id)}
+                        />
+                        <Button size="sm" onClick={() => submitComment(post.id)}>
+                          <Send className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                   <Button type="button" variant="ghost" size="sm">
                     <Send className="w-4 h-4" />
                     {post.shares}
@@ -904,13 +959,60 @@ export default function SocialApp() {
               </p>
             </div>
             <div className="flex gap-2 flex-wrap">
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button type="button">
+                    <Package className="w-4 h-4" />
+                    نشر منتج في السوق
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>نشر منتج جديد</DialogTitle>
+                    <DialogDescription>أدخل تفاصيل المنتج ليظهر في السوق الإلكتروني.</DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4 py-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">اسم المنتج</label>
+                      <Input 
+                        placeholder="مثال: سماعات لاسلكية" 
+                        value={marketForm.name}
+                        onChange={(e) => setMarketForm({...marketForm, name: e.target.value})}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">السعر</label>
+                      <Input 
+                        placeholder="مثال: 500 ج.م" 
+                        value={marketForm.price}
+                        onChange={(e) => setMarketForm({...marketForm, price: e.target.value})}
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">اسم المتجر</label>
+                        <Input 
+                          placeholder="متجري" 
+                          value={marketForm.store}
+                          onChange={(e) => setMarketForm({...marketForm, store: e.target.value})}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">المدينة</label>
+                        <Input 
+                          placeholder="القاهرة" 
+                          value={marketForm.city}
+                          onChange={(e) => setMarketForm({...marketForm, city: e.target.value})}
+                        />
+                      </div>
+                    </div>
+                    <Button className="w-full" onClick={handlePublishProduct}>نشر الآن</Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
               <Button type="button" variant="outline">
                 <Store className="w-4 h-4" />
-                إنشاء صفحة المتجر
-              </Button>
-              <Button type="button" onClick={addMarketItem}>
-                <Package className="w-4 h-4" />
-                نشر منتج
+                إدارة متجري
               </Button>
             </div>
           </div>

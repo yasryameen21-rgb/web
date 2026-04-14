@@ -56,6 +56,13 @@ export default function Welcome() {
             <h2 className="text-3xl font-bold text-foreground mb-3">
               أهلاً وسهلاً!
             </h2>
+            <div className="my-6 flex justify-center">
+              <img 
+                src="/welcome-child-realistic.png" 
+                alt="Welcome to Yamen Chat" 
+                className="w-64 h-64 object-cover rounded-2xl shadow-md border-4 border-primary/20"
+              />
+            </div>
             <p className="text-lg text-muted-foreground mb-6">
               تم إنشاء حسابك بنجاح في يامن شات
             </p>
