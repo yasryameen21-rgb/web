@@ -125,12 +125,13 @@ export default function Welcome() {
 
         {/* زر الانتقال إلى التطبيق */}
         <div className="flex justify-center">
-          <Button
-            size="lg"
-            className="smooth-transition hover:shadow-lg hover:scale-105 px-8"
-          >
-            ابدأ الآن
-          </Button>
+        <Button 
+  onClick={() => setLocation("/home")} 
+  className="bg-[#5c56d6] hover:bg-[#4a44b5] text-white px-8 py-2 rounded-lg"
+>
+  ابدأ الآن
+</Button>
+
         </div>
       </div>
 
