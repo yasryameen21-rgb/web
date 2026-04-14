@@ -19,7 +19,7 @@ export default function Home() {
     try {
       // محاكاة تسجيل الدخول
       await new Promise((resolve) => setTimeout(resolve, 500));
-      // يمكن إضافة منطق تسجيل الدخول هنا
+      setLocation("/app");
     } finally {
       setIsLoading(false);
     }
