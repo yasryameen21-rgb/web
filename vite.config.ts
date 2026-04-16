@@ -1,7 +1,7 @@
 import { jsxLocPlugin } from "@builder.io/vite-plugin-jsx-loc";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import fs from "node:fs";
+//import fs from "node:fs";
 import path from "node:path";
 import { defineConfig, type Plugin, type ViteDevServer } from "vite";
 
@@ -14,9 +14,9 @@ function ensureLogDir() {
       }
 }
 
-function trimLogFile(logPath: string, maxSize: number) {
-      if (!fs.existsSync(logPath)) return;
-      const stats = fs.statSync(logPath);
+//function trimLogFile(logPath: string, maxSize: number) {
+    //  if (!fs.existsSync(logPath)) return;
+     // const stats = fs.statSync(logPath);
       if (stats.size <= maxSize) return;
 
   const targetSize = Math.floor(maxSize * 0.6); // Trim to 60% to avoid constant re-trimming
@@ -32,7 +32,7 @@ function trimLogFile(logPath: string, maxSize: number) {
           keptBytes += lineBytes;
   }
 
-  fs.writeFileSync(logPath, keptLines.join("\n") + "\n", "utf-8");
+//  fs.writeFileSync(logPath, keptLines.join("\n") + "\n", "utf-8");
 }
 
 function writeToLogFile(source: string, entries: any[]) {
