@@ -11,9 +11,6 @@ MAX_LOG_SIZE_BYTES * 0.6); // Trim to 60% to avoid constant re-trimming
     const keptLines: string[] = [];
     let keptBytes = 0;
 
-function writeToLogFile(source: LogSource, entries: unknown[]) {
-  if (entries.length === 0) return;
-
   ensureLogDir();
   const logPath = path.join(LOG_DIR, `${source}.log`);
 
