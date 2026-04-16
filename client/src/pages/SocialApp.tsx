@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import {
   Bell,
@@ -13,7 +13,6 @@ import {
   Home,
   ImagePlus,
   Loader2,
-  LogOut,
   Menu,
   MessageCircle,
   Mic,
@@ -58,7 +57,6 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
-import { toast } from "sonner";
 
 type AppTab = "feed" | "chat" | "reels" | "live" | "notifications" | "market" | "settings";
 
@@ -75,9 +73,6 @@ type Post = {
   following: boolean;
   blocked: boolean;
   category: string;
-  mediaType?: "image" | "video";
-  mediaUrl?: string;
-  mediaName?: string;
 };
 
 type ChatThread = {
@@ -300,14 +295,6 @@ export default function SocialApp() {
   const [selectedChatId, setSelectedChatId] = useState(initialChats[0].id);
   const [chatMessage, setChatMessage] = useState("");
   const [isPublishing, setIsPublishing] = useState(false);
-  const imageInputRef = useRef<HTMLInputElement | null>(null);
-  const videoInputRef = useRef<HTMLInputElement | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [selectedMedia, setSelectedMedia] = useState<{
-    type: "image" | "video";
-    url: string;
-    name: string;
-  } | null>(null);
 
   const selectedChat = useMemo(
     () => chatThreads.find((thread) => thread.id === selectedChatId) ?? chatThreads[0],
@@ -378,7 +365,7 @@ export default function SocialApp() {
   };
 
   const submitPost = async () => {
-    if (!postText.trim() && !selectedMedia) return;
+    if (!postText.trim()) return;
     setIsPublishing(true);
     await new Promise((resolve) => setTimeout(resolve, 600));
 
@@ -387,7 +374,7 @@ export default function SocialApp() {
         id: Date.now(),
         author: "أنت",
         handle: "@you",
-        text: postText || (selectedMedia?.type === "video" ? "تم نشر فيديو جديد" : "تم نشر صورة جديدة"),
+        text: postText,
         time: "الآن",
         likes: 0,
         comments: 0,
@@ -395,17 +382,11 @@ export default function SocialApp() {
         liked: false,
         following: true,
         blocked: false,
-        category: selectedMedia?.type === "video" ? "فيديو جديد" : selectedMedia?.type === "image" ? "صورة جديدة" : "منشور جديد",
-        mediaType: selectedMedia?.type,
-        mediaUrl: selectedMedia?.url,
-        mediaName: selectedMedia?.name,
+        category: "منشور جديد",
       },
       ...current,
     ]);
-
-    toast.success(selectedMedia?.type === "video" ? "تم نشر الفيديو بنجاح" : selectedMedia?.type === "image" ? "تم نشر الصورة بنجاح" : "تم نشر المنشور بنجاح");
     setPostText("");
-    clearSelectedMedia();
     setIsPublishing(false);
     setActiveTab("feed");
   };
@@ -490,65 +471,8 @@ export default function SocialApp() {
     ]);
   };
 
-  const clearSelectedMedia = () => {
-    setSelectedMedia(null);
-    if (imageInputRef.current) imageInputRef.current.value = "";
-    if (videoInputRef.current) videoInputRef.current.value = "";
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
-
-  const handleMediaSelection = (
-    event: React.ChangeEvent<HTMLInputElement>,
-    forcedType?: "image" | "video"
-  ) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const inferredType = forcedType || (file.type.startsWith("video/") ? "video" : "image");
-    const fileUrl = URL.createObjectURL(file);
-
-    setSelectedMedia({
-      type: inferredType,
-      url: fileUrl,
-      name: file.name,
-    });
-
-    toast.success(inferredType === "video" ? "تم اختيار الفيديو بنجاح" : "تم اختيار الصورة بنجاح");
-  };
-
-  const openImagePicker = () => imageInputRef.current?.click();
-  const openVideoPicker = () => videoInputRef.current?.click();
-  const openFilePicker = () => fileInputRef.current?.click();
-
-  const handleLogout = () => {
-    localStorage.removeItem("yamenChatSignupProfile");
-    toast.success("تم تسجيل الخروج بنجاح");
-    setLocation("/");
-  };
-
   const renderFeed = () => (
     <div className="space-y-4">
-      <input
-        ref={imageInputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={(e) => handleMediaSelection(e, "image")}
-      />
-      <input
-        ref={videoInputRef}
-        type="file"
-        accept="video/*"
-        className="hidden"
-        onChange={(e) => handleMediaSelection(e, "video")}
-      />
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*,video/*"
-        className="hidden"
-        onChange={(e) => handleMediaSelection(e)}
-      />
       <Card className="border-0 shadow-lg">
         <CardHeader className="pb-4">
           <div className="flex items-center justify-between gap-3">
@@ -568,39 +492,20 @@ export default function SocialApp() {
             placeholder="بماذا تفكر الآن؟"
             className="min-h-28 bg-background"
           />
-          {selectedMedia && (
-            <div className="rounded-2xl border border-blue-200 bg-white p-3 space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="font-semibold">معاينة قبل النشر</p>
-                  <p className="text-sm text-muted-foreground">{selectedMedia.name}</p>
-                </div>
-                <Button type="button" variant="outline" className="border-red-200 text-red-700" onClick={clearSelectedMedia}>
-                  <X className="w-4 h-4" />
-                  إزالة
-                </Button>
-              </div>
-              {selectedMedia.type === "image" ? (
-                <img src={selectedMedia.url} alt={selectedMedia.name} className="w-full max-h-80 object-cover rounded-xl border" />
-              ) : (
-                <video src={selectedMedia.url} controls className="w-full max-h-80 rounded-xl border bg-black" />
-              )}
-            </div>
-          )}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Button type="button" variant="outline" className="justify-start border-blue-200 text-blue-700 hover:bg-blue-50" onClick={openImagePicker}>
+            <Button type="button" variant="outline" className="justify-start">
               <Camera className="w-4 h-4" />
               من الكاميرا
             </Button>
-            <Button type="button" variant="outline" className="justify-start border-cyan-200 text-cyan-700 hover:bg-cyan-50" onClick={openFilePicker}>
+            <Button type="button" variant="outline" className="justify-start">
               <Upload className="w-4 h-4" />
               من الملفات
             </Button>
-            <Button type="button" variant="outline" className="justify-start border-violet-200 text-violet-700 hover:bg-violet-50" onClick={openVideoPicker}>
+            <Button type="button" variant="outline" className="justify-start">
               <Video className="w-4 h-4" />
               فيديو قصير
             </Button>
-            <Button type="button" variant="outline" className="justify-start border-emerald-200 text-emerald-700 hover:bg-emerald-50">
+            <Button type="button" variant="outline" className="justify-start">
               <Mic className="w-4 h-4" />
               بث صوتي
             </Button>
@@ -612,7 +517,7 @@ export default function SocialApp() {
             <Badge variant="secondary">تعليقات فورية</Badge>
             <Badge variant="secondary">مشاركة إلى الريلز</Badge>
           </div>
-          <Button onClick={submitPost} disabled={(!postText.trim() && !selectedMedia) || isPublishing} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+          <Button onClick={submitPost} disabled={!postText.trim() || isPublishing}>
             {isPublishing ? <Loader2 className="w-4 h-4 animate-spin" /> : <CirclePlus className="w-4 h-4" />}
             نشر الآن
           </Button>
@@ -659,22 +564,14 @@ export default function SocialApp() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <p className="leading-7">{post.text}</p>
-                <div className="rounded-2xl bg-gradient-to-br from-primary/15 via-secondary to-accent/20 min-h-52 flex items-center justify-center text-center p-6 overflow-hidden">
-                  {post.mediaUrl ? (
-                    post.mediaType === "video" ? (
-                      <video src={post.mediaUrl} controls className="w-full max-h-96 rounded-xl bg-black" />
-                    ) : (
-                      <img src={post.mediaUrl} alt={post.mediaName || post.text} className="w-full max-h-96 object-cover rounded-xl" />
-                    )
-                  ) : (
-                    <div>
-                      <MonitorPlay className="w-10 h-10 mx-auto text-primary mb-3" />
-                      <p className="font-medium">منطقة معاينة للصور والفيديو داخل المنشور</p>
-                      <p className="text-sm text-muted-foreground mt-2">
-                        جاهزة لإضافة وسائط من الكاميرا أو ملفات الهاتف.
-                      </p>
-                    </div>
-                  )}
+                <div className="rounded-2xl bg-gradient-to-br from-primary/15 via-secondary to-accent/20 min-h-52 flex items-center justify-center text-center p-6">
+                  <div>
+                    <MonitorPlay className="w-10 h-10 mx-auto text-primary mb-3" />
+                    <p className="font-medium">منطقة معاينة للصور والفيديو داخل المنشور</p>
+                    <p className="text-sm text-muted-foreground mt-2">
+                      جاهزة لإضافة وسائط من الكاميرا أو ملفات الهاتف.
+                    </p>
+                  </div>
                 </div>
               </CardContent>
               <CardFooter className="border-t pt-5 justify-between gap-2 flex-wrap">
@@ -714,13 +611,13 @@ export default function SocialApp() {
                   </Button>
                 </div>
                 <div className="flex gap-2 flex-wrap">
-                  <Button type="button" variant="outline" size="sm" className="border-amber-200 text-amber-700 hover:bg-amber-50" onClick={openImagePicker}>
+                  <Button type="button" variant="outline" size="sm">
                     <ImagePlus className="w-4 h-4" />
-                    أضف صورة
+                    أضف وسائط
                   </Button>
-                  <Button type="button" variant="outline" size="sm" className="border-violet-200 text-violet-700 hover:bg-violet-50" onClick={openVideoPicker}>
+                  <Button type="button" variant="outline" size="sm">
                     <Sparkles className="w-4 h-4" />
-                    أضف فيديو
+                    تحويل إلى ريل
                   </Button>
                 </div>
               </CardFooter>
@@ -896,11 +793,11 @@ export default function SocialApp() {
               </p>
             </div>
             <div className="flex gap-2 flex-wrap">
-              <Button type="button" variant="outline" className="border-blue-200 text-blue-700 hover:bg-blue-50" onClick={openVideoPicker}>
+              <Button type="button" variant="outline">
                 <Camera className="w-4 h-4" />
                 تصوير ريل
               </Button>
-              <Button type="button" className="bg-fuchsia-600 hover:bg-fuchsia-700 text-white" onClick={openVideoPicker}>
+              <Button type="button">
                 <CirclePlus className="w-4 h-4" />
                 نشر ريل
               </Button>
@@ -941,13 +838,13 @@ export default function SocialApp() {
                 </Button>
               </div>
               <div className="flex gap-2">
-                <Button type="button" variant="outline" size="sm" className="border-fuchsia-200 text-fuchsia-700 hover:bg-fuchsia-50" onClick={openVideoPicker}>
+                <Button type="button" variant="outline" size="sm">
                   <Upload className="w-4 h-4" />
                   نشر
                 </Button>
-                <Button type="button" variant="outline" size="sm" className="border-amber-200 text-amber-700 hover:bg-amber-50" onClick={openImagePicker}>
+                <Button type="button" variant="outline" size="sm">
                   <ImagePlus className="w-4 h-4" />
-                  غلاف
+                  تعليق
                 </Button>
               </div>
             </CardFooter>
@@ -1190,16 +1087,6 @@ export default function SocialApp() {
                 <Badge variant="secondary">ملفات</Badge>
               </div>
             </div>
-            <div className="rounded-2xl border p-4 flex items-center justify-between gap-3 bg-red-50/70">
-              <div>
-                <p className="font-semibold">تسجيل الخروج</p>
-                <p className="text-sm text-muted-foreground">إنهاء الجلسة الحالية والعودة إلى شاشة البداية.</p>
-              </div>
-              <Button type="button" variant="outline" className="border-red-200 text-red-700 hover:bg-red-100" onClick={handleLogout}>
-                <LogOut className="w-4 h-4" />
-                تسجيل الخروج
-              </Button>
-            </div>
           </CardContent>
         </Card>
 
@@ -1247,7 +1134,7 @@ export default function SocialApp() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-sky-100 via-blue-50 to-cyan-100 pb-28">
+    <div className="min-h-screen bg-gradient-to-br from-background via-background to-secondary/20 pb-28">
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-0 right-0 h-72 w-72 rounded-full bg-primary/10 blur-3xl" />
         <div className="absolute bottom-0 left-0 h-80 w-80 rounded-full bg-accent/10 blur-3xl" />
