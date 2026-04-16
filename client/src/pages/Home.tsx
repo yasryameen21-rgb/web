@@ -3,7 +3,9 @@ import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
-import { Mail, Phone, Download, ArrowLeft } from "lucide-react";
+import { Mail, Phone, Download } from "lucide-react";
+import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
 
 const GOOGLE_DRIVE_LINK = "https://drive.google.com/uc?export=download&id=YOUR_FILE_ID";
 
@@ -12,14 +14,19 @@ export default function Home() {
   const [loginMethod, setLoginMethod] = useState<"phone" | "email">("phone");
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const { data: currentUser } = trpc.auth.me.useQuery();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      // محاكاة تسجيل الدخول
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      setLocation("/app");
+      if (currentUser) {
+        setLocation("/app");
+        return;
+      }
+
+      toast.info("الدخول من الويب بقى API-first، اعمل إنشاء حساب جديد الأول علشان يتسجل سيشن حقيقي");
+      setLocation("/signup");
     } finally {
       setIsLoading(false);
     }
@@ -115,7 +122,7 @@ export default function Home() {
                 disabled={isLoading || !inputValue}
                 className="w-full h-12 text-base font-semibold smooth-transition hover:shadow-lg"
               >
-                {isLoading ? "جاري التسجيل..." : "تسجيل الدخول"}
+                {isLoading ? "جارٍ التحقق..." : currentUser ? "الدخول إلى حسابك" : "إنشاء/تفعيل حساب"}
               </Button>
             </form>
 

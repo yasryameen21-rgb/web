@@ -1,778 +1,501 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import {
   Bell,
-  Blocks,
-  Camera,
   Check,
-  ChevronLeft,
   CirclePlus,
-  Filter,
-  Gift,
-  Heart,
   Home,
-  ImagePlus,
   Loader2,
-  Menu,
+  LogOut,
   MessageCircle,
-  Mic,
-  MonitorPlay,
-  Package,
-  Phone,
   PlayCircle,
-  Search,
   Send,
   Settings,
-  Shield,
   ShoppingBag,
-  Sparkles,
-  Store,
-  Upload,
-  UserCheck,
   UserPlus,
   Users,
   Video,
-  VideoIcon,
-  X,
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
+import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
 
-type AppTab = "feed" | "chat" | "reels" | "live" | "notifications" | "market" | "settings";
-
-type Post = {
-  id: number;
-  author: string;
-  handle: string;
-  text: string;
-  time: string;
-  likes: number;
-  comments: number;
-  shares: number;
-  liked: boolean;
-  following: boolean;
-  blocked: boolean;
-  category: string;
-};
-
-type ChatThread = {
-  id: number;
-  name: string;
-  lastMessage: string;
-  time: string;
-  online: boolean;
-  unread: number;
-  messages: { id: number; text: string; mine: boolean; time: string }[];
-};
-
-type FriendRequest = {
-  id: number;
-  name: string;
-  mutual: number;
-  city: string;
-  status: "pending" | "accepted" | "declined";
-};
-
-type Suggestion = {
-  id: number;
-  name: string;
-  bio: string;
-  following: boolean;
-};
-
-type LiveHost = {
-  id: number;
-  name: string;
-  title: string;
-  viewers: string;
-  filter: string;
-  invited: boolean;
-  joinRequested: boolean;
-};
-
-type GroupJoin = {
-  id: number;
-  name: string;
-  members: string;
-  requestSent: boolean;
-};
-
-type Product = {
-  id: number;
-  name: string;
-  price: string;
-  store: string;
-  city: string;
-  posted: string;
-};
+type AppTab = "feed" | "chat" | "stories" | "live" | "notifications" | "market" | "settings";
 
 const navItems: { key: AppTab; label: string; icon: typeof Home }[] = [
   { key: "feed", label: "المنشورات", icon: Home },
   { key: "chat", label: "الدردشة", icon: MessageCircle },
-  { key: "reels", label: "ريلز", icon: PlayCircle },
-  { key: "live", label: "بث", icon: VideoIcon },
+  { key: "stories", label: "الستوري", icon: PlayCircle },
+  { key: "live", label: "البث", icon: Video },
   { key: "notifications", label: "الإشعارات", icon: Bell },
   { key: "market", label: "السوق", icon: ShoppingBag },
-  { key: "settings", label: "الإعدادات", icon: Settings },
-];
-
-const initialPosts: Post[] = [
-  {
-    id: 1,
-    author: "ياسر عبدالله",
-    handle: "@yasser.family",
-    text: "أهلاً بكل الأصدقاء 👋 أضفت اليوم مساحة جديدة للمنشورات والريلز والبث المباشر. شاركوني أول انطباع لكم عن التصميم الجديد.",
-    time: "منذ 12 دقيقة",
-    likes: 128,
-    comments: 24,
-    shares: 13,
-    liked: false,
-    following: true,
-    blocked: false,
-    category: "تحديثات",
-  },
-  {
-    id: 2,
-    author: "هند محمود",
-    handle: "@hind.creates",
-    text: "جربت ميزة رفع الصور من الملفات والكاميرا في صفحة النشر، والخطوة الجاية إني أنشر فيديو قصير في الريلز ✨",
-    time: "منذ 45 دقيقة",
-    likes: 92,
-    comments: 18,
-    shares: 7,
-    liked: true,
-    following: false,
-    blocked: false,
-    category: "صور وفيديو",
-  },
-  {
-    id: 3,
-    author: "محمود سامي",
-    handle: "@mahmoud.live",
-    text: "هبدأ بث مباشر الليلة عن إنشاء الصفحات والمتاجر داخل التطبيق. لو حابب تنضم كضيف ابعت طلب انضمام من صفحة البث.",
-    time: "منذ ساعة",
-    likes: 210,
-    comments: 44,
-    shares: 29,
-    liked: false,
-    following: false,
-    blocked: false,
-    category: "بث مباشر",
-  },
-];
-
-const initialChats: ChatThread[] = [
-  {
-    id: 1,
-    name: "فريق التطوير",
-    lastMessage: "تم تجهيز واجهة السوق والإشعارات.",
-    time: "الآن",
-    online: true,
-    unread: 3,
-    messages: [
-      { id: 1, text: "صباح الخير، هل تم ربط زر ابدأ الآن؟", mine: false, time: "9:11" },
-      { id: 2, text: "نعم، أصبح ينقلك مباشرة إلى الصفحة الرئيسية الجديدة.", mine: true, time: "9:13" },
-      { id: 3, text: "ممتاز، نكمل تحسين صفحة البث المباشر.", mine: false, time: "9:15" },
-    ],
-  },
-  {
-    id: 2,
-    name: "مجموعة العائلة",
-    lastMessage: "مين هيجرب ميزة الريلز؟",
-    time: "قبل 10 د",
-    online: true,
-    unread: 1,
-    messages: [
-      { id: 1, text: "مين هيجرب ميزة الريلز؟", mine: false, time: "8:50" },
-      { id: 2, text: "أنا جهزت فيديو قصير بالفعل 😄", mine: true, time: "8:53" },
-    ],
-  },
-  {
-    id: 3,
-    name: "سارة التصميم",
-    lastMessage: "ألوان الواجهة ممتازة جداً",
-    time: "أمس",
-    online: false,
-    unread: 0,
-    messages: [
-      { id: 1, text: "ألوان الواجهة ممتازة جداً", mine: false, time: "أمس" },
-      { id: 2, text: "شكراً، سنضيف بعض التحسينات على صفحة الإعدادات.", mine: true, time: "أمس" },
-    ],
-  },
-];
-
-const initialRequests: FriendRequest[] = [
-  { id: 1, name: "أحمد فوزي", mutual: 12, city: "القاهرة", status: "pending" },
-  { id: 2, name: "منة السيد", mutual: 8, city: "الإسكندرية", status: "pending" },
-  { id: 3, name: "خالد ربيع", mutual: 20, city: "المنصورة", status: "accepted" },
-];
-
-const initialSuggestions: Suggestion[] = [
-  { id: 1, name: "نور أحمد", bio: "تصميم واجهات وتجربة مستخدم", following: false },
-  { id: 2, name: "عبدالرحمن علي", bio: "صانع محتوى تقني وبث مباشر", following: false },
-  { id: 3, name: "داليا سامح", bio: "متجر إلكتروني للأزياء والإكسسوارات", following: true },
-];
-
-const initialLiveHosts: LiveHost[] = [
-  { id: 1, name: "رامي لايف", title: "جولة داخل المتجر الإلكتروني", viewers: "2.1K", filter: "سينمائي", invited: false, joinRequested: false },
-  { id: 2, name: "نورا شورتس", title: "كيف تنشئ ريل احترافي؟", viewers: "980", filter: "وردية", invited: true, joinRequested: false },
-  { id: 3, name: "أدمن المجتمع", title: "استقبال طلبات الانضمام للمجموعات", viewers: "1.4K", filter: "طبيعي", invited: false, joinRequested: true },
-];
-
-const initialGroups: GroupJoin[] = [
-  { id: 1, name: "مجموعة المصممين", members: "12.4 ألف عضو", requestSent: false },
-  { id: 2, name: "نادي التجارة الرقمية", members: "8.7 ألف عضو", requestSent: true },
-  { id: 3, name: "مجتمع البث المباشر", members: "5.3 ألف عضو", requestSent: false },
-];
-
-const initialProducts: Product[] = [
-  { id: 1, name: "سماعات لاسلكية", price: "750 ج.م", store: "متجر يامن تك", city: "القاهرة", posted: "منذ ساعة" },
-  { id: 2, name: "طقم إضاءة بث مباشر", price: "1,250 ج.م", store: "ستور ستريم", city: "الجيزة", posted: "منذ 3 ساعات" },
-  { id: 3, name: "حامل موبايل للتصوير", price: "320 ج.م", store: "فاست شوب", city: "طنطا", posted: "أمس" },
-];
-
-const notificationsSeed = [
-  { id: 1, title: "تم قبول طلب صداقتك", description: "خالد ربيع أصبح ضمن أصدقائك.", type: "صداقة" },
-  { id: 2, title: "دعوة جديدة للبث", description: "نورا شورتس دعتك للانضمام إلى بثها اليوم.", type: "بث" },
-  { id: 3, title: "طلب انضمام للمجموعة", description: "تمت مراجعة طلبك في نادي التجارة الرقمية.", type: "مجموعات" },
-  { id: 4, title: "عميل مهتم في السوق", description: "هناك تفاعل جديد على إعلان حامل الموبايل.", type: "السوق" },
-];
-
-const reelItems = [
-  {
-    id: 1,
-    creator: "نادر فيديو",
-    title: "3 حيل سريعة لزيادة تفاعل المنشورات",
-    likes: "12 ألف",
-    comments: 230,
-    shares: 88,
-  },
-  {
-    id: 2,
-    creator: "سلمى ميديا",
-    title: "تحويل منتج بسيط إلى إعلان جذاب خلال 20 ثانية",
-    likes: "8.7 ألف",
-    comments: 175,
-    shares: 53,
-  },
+  { key: "settings", label: "المجموعات والحساب", icon: Settings },
 ];
 
 export default function SocialApp() {
   const [, setLocation] = useLocation();
+  const utils = trpc.useUtils();
   const [activeTab, setActiveTab] = useState<AppTab>("feed");
-  const [posts, setPosts] = useState(initialPosts);
-  const [requests, setRequests] = useState(initialRequests);
-  const [suggestions, setSuggestions] = useState(initialSuggestions);
-  const [liveHosts, setLiveHosts] = useState(initialLiveHosts);
-  const [groups, setGroups] = useState(initialGroups);
-  const [products, setProducts] = useState(initialProducts);
-  const [searchValue, setSearchValue] = useState("");
   const [postText, setPostText] = useState("");
-  const [commentText, setCommentText] = useState<{ [key: number]: string }>({});
-  const [activeCommentId, setActiveCommentId] = useState<number | null>(null);
-  const [marketForm, setMarketForm] = useState({ name: "", price: "", store: "", city: "" });
-  const [chatThreads, setChatThreads] = useState(initialChats);
-  const [selectedChatId, setSelectedChatId] = useState(initialChats[0].id);
+  const [commentText, setCommentText] = useState<Record<string, string>>({});
+  const [marketForm, setMarketForm] = useState({ name: "", price: "", city: "", category: "other" });
+  const [storyForm, setStoryForm] = useState({ mediaUrl: "", mediaType: "image" as "image" | "video" });
+  const [liveTitle, setLiveTitle] = useState("");
   const [chatMessage, setChatMessage] = useState("");
-  const [isPublishing, setIsPublishing] = useState(false);
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
 
-  const selectedChat = useMemo(
-    () => chatThreads.find((thread) => thread.id === selectedChatId) ?? chatThreads[0],
-    [chatThreads, selectedChatId]
+  const { data: currentUser, isLoading: isUserLoading } = trpc.auth.me.useQuery();
+  const logoutMutation = trpc.auth.logout.useMutation();
+
+  const feedQuery = trpc.feed.list.useQuery();
+  const directoryQuery = trpc.users.directory.useQuery();
+  const friendsQuery = trpc.users.friendsList.useQuery(undefined, { enabled: !!currentUser });
+  const groupsQuery = trpc.groups.list.useQuery();
+  const notificationsQuery = trpc.notifications.list.useQuery();
+  const marketQuery = trpc.market.list.useQuery();
+  const storiesQuery = trpc.stories.list.useQuery();
+  const liveQuery = trpc.live.list.useQuery();
+  const conversationsQuery = trpc.chat.conversations.useQuery(undefined, { enabled: !!currentUser });
+  const messagesQuery = trpc.chat.messages.useQuery(
+    { conversationId: selectedConversationId ?? "" },
+    { enabled: !!selectedConversationId && !!currentUser }
   );
 
-  const unreadNotifications = notificationsSeed.length;
-  const pendingRequests = requests.filter((request) => request.status === "pending").length;
-  const visiblePosts = posts.filter((post) => !post.blocked);
+  const createPostMutation = trpc.feed.create.useMutation();
+  const reactMutation = trpc.feed.react.useMutation();
+  const commentMutation = trpc.feed.comment.useMutation();
+  const addFriendMutation = trpc.users.addFriend.useMutation();
+  const removeFriendMutation = trpc.users.removeFriend.useMutation();
+  const createConversationMutation = trpc.chat.createConversation.useMutation();
+  const sendMessageMutation = trpc.chat.sendMessage.useMutation();
+  const createStoryMutation = trpc.stories.create.useMutation();
+  const viewStoryMutation = trpc.stories.view.useMutation();
+  const startLiveMutation = trpc.live.start.useMutation();
+  const endLiveMutation = trpc.live.end.useMutation();
+  const markNotificationMutation = trpc.notifications.markRead.useMutation();
+  const markAllNotificationsMutation = trpc.notifications.markAllRead.useMutation();
+  const createMarketMutation = trpc.market.create.useMutation();
+  const toggleGroupMutation = trpc.groups.toggleMembership.useMutation();
 
-  const toggleLike = (postId: number) => {
-    setPosts((current) =>
-      current.map((post) =>
-        post.id === postId
-          ? {
-              ...post,
-              liked: !post.liked,
-              likes: post.liked ? post.likes - 1 : post.likes + 1,
-            }
-          : post
-      )
-    );
+  useEffect(() => {
+    if (!isUserLoading && !currentUser) {
+      setLocation("/");
+    }
+  }, [currentUser, isUserLoading, setLocation]);
+
+  useEffect(() => {
+    if (!selectedConversationId && conversationsQuery.data?.length) {
+      setSelectedConversationId(conversationsQuery.data[0].id);
+    }
+  }, [conversationsQuery.data, selectedConversationId]);
+
+  const friendIds = useMemo(() => new Set((friendsQuery.data ?? []).map(friend => friend.id)), [friendsQuery.data]);
+  const suggestions = useMemo(
+    () => (directoryQuery.data ?? []).filter(user => !friendIds.has(user.id)).slice(0, 8),
+    [directoryQuery.data, friendIds]
+  );
+
+  const unreadNotifications = (notificationsQuery.data ?? []).filter(item => !item.isRead).length;
+  const isBusy =
+    createPostMutation.isPending ||
+    sendMessageMutation.isPending ||
+    createStoryMutation.isPending ||
+    startLiveMutation.isPending ||
+    createMarketMutation.isPending;
+
+  const invalidateCommon = async () => {
+    await Promise.all([
+      utils.feed.list.invalidate(),
+      utils.notifications.list.invalidate(),
+      utils.chat.conversations.invalidate(),
+      utils.chat.messages.invalidate(),
+      utils.users.friendsList.invalidate(),
+      utils.groups.list.invalidate(),
+      utils.market.list.invalidate(),
+      utils.stories.list.invalidate(),
+      utils.live.list.invalidate(),
+    ]);
   };
 
-  const toggleFollowPostAuthor = (postId: number) => {
-    setPosts((current) =>
-      current.map((post) =>
-        post.id === postId ? { ...post, following: !post.following } : post
-      )
-    );
+  const handleLogout = async () => {
+    try {
+      await logoutMutation.mutateAsync();
+      setLocation("/");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر تسجيل الخروج حالياً");
+    }
   };
 
-  const blockAuthor = (postId: number) => {
-    setPosts((current) =>
-      current.map((post) => (post.id === postId ? { ...post, blocked: true } : post))
-    );
-  };
-
-  const submitComment = (postId: number) => {
-    const text = commentText[postId];
-    if (!text?.trim()) return;
-    
-    setPosts((current) =>
-      current.map((post) =>
-        post.id === postId
-          ? { ...post, comments: post.comments + 1 }
-          : post
-      )
-    );
-    setCommentText({ ...commentText, [postId]: "" });
-    setActiveCommentId(null);
-  };
-
-  const handlePublishProduct = () => {
-    if (!marketForm.name || !marketForm.price) return;
-    
-    const newProduct: Product = {
-      id: Date.now(),
-      name: marketForm.name,
-      price: marketForm.price,
-      store: marketForm.store || "متجري",
-      city: marketForm.city || "غير محدد",
-      posted: "الآن",
-    };
-    
-    setProducts([newProduct, ...products]);
-    setMarketForm({ name: "", price: "", store: "", city: "" });
-  };
-
-  const submitPost = async () => {
+  const handleCreatePost = async () => {
     if (!postText.trim()) return;
-    setIsPublishing(true);
-    await new Promise((resolve) => setTimeout(resolve, 600));
-
-    setPosts((current) => [
-      {
-        id: Date.now(),
-        author: "أنت",
-        handle: "@you",
-        text: postText,
-        time: "الآن",
-        likes: 0,
-        comments: 0,
-        shares: 0,
-        liked: false,
-        following: true,
-        blocked: false,
-        category: "منشور جديد",
-      },
-      ...current,
-    ]);
-    setPostText("");
-    setIsPublishing(false);
-    setActiveTab("feed");
+    try {
+      await createPostMutation.mutateAsync({ content: postText, postType: "text" });
+      setPostText("");
+      toast.success("تم نشر المنشور من الـ API");
+      await utils.feed.list.invalidate();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر نشر المنشور");
+    }
   };
 
-  const sendChatMessage = () => {
-    if (!chatMessage.trim()) return;
+  const handleToggleLike = async (postId: string, currentlyLiked: boolean) => {
+    try {
+      await reactMutation.mutateAsync({ postId, currentlyLiked, reactionType: "like" });
+      await utils.feed.list.invalidate();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر تحديث الإعجاب");
+    }
+  };
 
-    setChatThreads((current) =>
-      current.map((thread) =>
-        thread.id === selectedChatId
-          ? {
-              ...thread,
-              lastMessage: chatMessage,
-              time: "الآن",
-              messages: [
-                ...thread.messages,
-                {
-                  id: Date.now(),
-                  text: chatMessage,
-                  mine: true,
-                  time: "الآن",
-                },
-              ],
-            }
-          : thread
-      )
+  const handleAddComment = async (postId: string) => {
+    const content = commentText[postId]?.trim();
+    if (!content) return;
+
+    try {
+      await commentMutation.mutateAsync({ postId, content });
+      setCommentText(current => ({ ...current, [postId]: "" }));
+      toast.success("تم إضافة التعليق");
+      await utils.feed.list.invalidate();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر إضافة التعليق");
+    }
+  };
+
+  const handleToggleFriend = async (friendId: string, isFriend: boolean) => {
+    try {
+      if (isFriend) {
+        await removeFriendMutation.mutateAsync({ friendId });
+        toast.success("تمت إزالة الصديق");
+      } else {
+        await addFriendMutation.mutateAsync({ friendId });
+        toast.success("تمت إضافة الصديق");
+      }
+      await Promise.all([utils.users.friendsList.invalidate(), utils.users.directory.invalidate()]);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر تحديث الصداقة");
+    }
+  };
+
+  const handleCreateConversation = async (participantId: string, name: string) => {
+    try {
+      const conversation = await createConversationMutation.mutateAsync({
+        participantIds: [participantId],
+        name,
+      });
+      toast.success("تم إنشاء المحادثة");
+      await utils.chat.conversations.invalidate();
+      setSelectedConversationId(conversation.id);
+      setActiveTab("chat");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر إنشاء المحادثة");
+    }
+  };
+
+  const handleSendMessage = async () => {
+    if (!selectedConversationId || !chatMessage.trim()) return;
+    try {
+      await sendMessageMutation.mutateAsync({
+        conversationId: selectedConversationId,
+        content: chatMessage,
+        messageType: "text",
+      });
+      setChatMessage("");
+      await Promise.all([utils.chat.messages.invalidate(), utils.chat.conversations.invalidate()]);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر إرسال الرسالة");
+    }
+  };
+
+  const handleCreateStory = async () => {
+    if (!storyForm.mediaUrl.trim()) return;
+    try {
+      await createStoryMutation.mutateAsync(storyForm);
+      setStoryForm({ mediaUrl: "", mediaType: "image" });
+      toast.success("تم نشر الستوري");
+      await utils.stories.list.invalidate();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر نشر الستوري");
+    }
+  };
+
+  const handleViewStory = async (storyId: string, mediaUrl: string) => {
+    try {
+      await viewStoryMutation.mutateAsync({ storyId });
+      window.open(mediaUrl, "_blank", "noopener,noreferrer");
+      await utils.stories.list.invalidate();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر فتح الستوري");
+    }
+  };
+
+  const handleStartLive = async () => {
+    if (!liveTitle.trim()) return;
+    try {
+      await startLiveMutation.mutateAsync({ title: liveTitle });
+      setLiveTitle("");
+      toast.success("تم بدء البث من الـ API");
+      await utils.live.list.invalidate();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر بدء البث");
+    }
+  };
+
+  const handleEndLive = async (streamId: string) => {
+    try {
+      await endLiveMutation.mutateAsync({ streamId });
+      toast.success("تم إنهاء البث");
+      await utils.live.list.invalidate();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر إنهاء البث");
+    }
+  };
+
+  const handleMarkNotification = async (notificationId: string) => {
+    try {
+      await markNotificationMutation.mutateAsync({ notificationId });
+      await utils.notifications.list.invalidate();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر تحديث الإشعار");
+    }
+  };
+
+  const handleMarkAllNotifications = async () => {
+    try {
+      await markAllNotificationsMutation.mutateAsync();
+      toast.success("تم تعليم كل الإشعارات كمقروءة");
+      await utils.notifications.list.invalidate();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر تحديث الإشعارات");
+    }
+  };
+
+  const handleCreateMarketItem = async () => {
+    if (!marketForm.name || !marketForm.price) return;
+    const numericPrice = Number.parseInt(marketForm.price.replace(/[^\d]/g, ""), 10);
+    if (Number.isNaN(numericPrice)) {
+      toast.error("اكتب سعر رقمي صحيح");
+      return;
+    }
+
+    try {
+      await createMarketMutation.mutateAsync({
+        title: marketForm.name,
+        description: `منتج منشور من ${currentUser?.name ?? "المستخدم"}`,
+        price: numericPrice,
+        currency: "EGP",
+        category: marketForm.category,
+        location: marketForm.city || null,
+        imageUrls: [],
+      });
+      setMarketForm({ name: "", price: "", city: "", category: "other" });
+      toast.success("تم نشر المنتج");
+      await utils.market.list.invalidate();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر نشر المنتج");
+    }
+  };
+
+  const handleToggleGroup = async (groupId: string, joined: boolean) => {
+    try {
+      await toggleGroupMutation.mutateAsync({ groupId, joined });
+      toast.success(joined ? "تم مغادرة المجموعة" : "تم الانضمام للمجموعة");
+      await utils.groups.list.invalidate();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر تحديث عضوية المجموعة");
+    }
+  };
+
+  const selectedConversation = useMemo(
+    () => (conversationsQuery.data ?? []).find(item => item.id === selectedConversationId) ?? null,
+    [conversationsQuery.data, selectedConversationId]
+  );
+
+  if (isUserLoading || (!currentUser && !isUserLoading)) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
     );
-    setChatMessage("");
-  };
-
-  const updateRequestStatus = (requestId: number, status: FriendRequest["status"]) => {
-    setRequests((current) =>
-      current.map((request) =>
-        request.id === requestId ? { ...request, status } : request
-      )
-    );
-  };
-
-  const toggleSuggestionFollow = (id: number) => {
-    setSuggestions((current) =>
-      current.map((item) =>
-        item.id === id ? { ...item, following: !item.following } : item
-      )
-    );
-  };
-
-  const toggleLiveInvite = (id: number) => {
-    setLiveHosts((current) =>
-      current.map((item) =>
-        item.id === id ? { ...item, invited: !item.invited } : item
-      )
-    );
-  };
-
-  const toggleJoinRequest = (id: number) => {
-    setLiveHosts((current) =>
-      current.map((item) =>
-        item.id === id ? { ...item, joinRequested: !item.joinRequested } : item
-      )
-    );
-  };
-
-  const toggleGroupRequest = (id: number) => {
-    setGroups((current) =>
-      current.map((group) =>
-        group.id === id ? { ...group, requestSent: !group.requestSent } : group
-      )
-    );
-  };
-
-  const addMarketItem = () => {
-    setProducts((current) => [
-      {
-        id: Date.now(),
-        name: "منتج جديد من صفحتك",
-        price: "قابل للتفاوض",
-        store: "متجرك الجديد",
-        city: "أضف المدينة",
-        posted: "الآن",
-      },
-      ...current,
-    ]);
-  };
+  }
 
   const renderFeed = () => (
-    <div className="space-y-4">
-      <Card className="border-0 shadow-lg">
-        <CardHeader className="pb-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <CardTitle className="text-lg">أنشئ منشور جديد</CardTitle>
-              <p className="text-sm text-muted-foreground mt-1">
-                اكتب منشورًا، ارفع صورة أو فيديو، أو ابدأ بثًا مباشرًا.
-              </p>
-            </div>
-            <Badge className="bg-primary/10 text-primary hover:bg-primary/10">واجهة اجتماعية كاملة</Badge>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <Textarea
-            value={postText}
-            onChange={(e) => setPostText(e.target.value)}
-            placeholder="بماذا تفكر الآن؟"
-            className="min-h-28 bg-background"
-          />
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Button type="button" variant="outline" className="justify-start">
-              <Camera className="w-4 h-4" />
-              من الكاميرا
+    <div className="grid gap-4 xl:grid-cols-[1.6fr,1fr]">
+      <div className="space-y-4">
+        <Card className="border-0 shadow-lg">
+          <CardHeader>
+            <CardTitle>أنشئ منشور جديد</CardTitle>
+            <CardDescription>الويب هنا بقى API-first بالكامل للمنشورات والتعليقات والإعجابات.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Textarea value={postText} onChange={(e) => setPostText(e.target.value)} placeholder="بماذا تفكر الآن؟" className="min-h-28" />
+            <Button onClick={handleCreatePost} disabled={!postText.trim() || createPostMutation.isPending}>
+              {createPostMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <CirclePlus className="w-4 h-4" />}
+              نشر الآن
             </Button>
-            <Button type="button" variant="outline" className="justify-start">
-              <Upload className="w-4 h-4" />
-              من الملفات
-            </Button>
-            <Button type="button" variant="outline" className="justify-start">
-              <Video className="w-4 h-4" />
-              فيديو قصير
-            </Button>
-            <Button type="button" variant="outline" className="justify-start">
-              <Mic className="w-4 h-4" />
-              بث صوتي
-            </Button>
-          </div>
-        </CardContent>
-        <CardFooter className="justify-between gap-3 border-t pt-6 flex-wrap">
-          <div className="flex gap-2 flex-wrap">
-            <Badge variant="secondary">خصوصية مرنة</Badge>
-            <Badge variant="secondary">تعليقات فورية</Badge>
-            <Badge variant="secondary">مشاركة إلى الريلز</Badge>
-          </div>
-          <Button onClick={submitPost} disabled={!postText.trim() || isPublishing}>
-            {isPublishing ? <Loader2 className="w-4 h-4 animate-spin" /> : <CirclePlus className="w-4 h-4" />}
-            نشر الآن
-          </Button>
-        </CardFooter>
-      </Card>
+          </CardContent>
+        </Card>
 
-      <div className="grid gap-4 lg:grid-cols-[1.5fr,1fr]">
-        <div className="space-y-4">
-          {visiblePosts.map((post) => (
-            <Card key={post.id} className="border-0 shadow-md">
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <Avatar className="size-12">
-                      <AvatarFallback className="bg-primary/15 text-primary font-bold">
-                        {post.author.slice(0, 1)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="font-semibold">{post.author}</h3>
-                        <Badge variant="outline">{post.category}</Badge>
-                      </div>
-                      <p className="text-sm text-muted-foreground">
-                        {post.handle} · {post.time}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      variant={post.following ? "secondary" : "outline"}
-                      size="sm"
-                      onClick={() => toggleFollowPostAuthor(post.id)}
-                    >
-                      <UserPlus className="w-4 h-4" />
-                      {post.following ? "متابَع" : "متابعة"}
-                    </Button>
-                    <Button type="button" variant="ghost" size="icon-sm" onClick={() => blockAuthor(post.id)}>
-                      <Blocks className="w-4 h-4 text-destructive" />
-                    </Button>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <p className="leading-7">{post.text}</p>
-                <div className="rounded-2xl bg-gradient-to-br from-primary/15 via-secondary to-accent/20 min-h-52 flex items-center justify-center text-center p-6">
+        {(feedQuery.data ?? []).map(post => (
+          <Card key={post.id} className="border-0 shadow-md">
+            <CardHeader>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <Avatar>
+                    <AvatarFallback>{post.author.slice(0, 1)}</AvatarFallback>
+                  </Avatar>
                   <div>
-                    <MonitorPlay className="w-10 h-10 mx-auto text-primary mb-3" />
-                    <p className="font-medium">منطقة معاينة للصور والفيديو داخل المنشور</p>
-                    <p className="text-sm text-muted-foreground mt-2">
-                      جاهزة لإضافة وسائط من الكاميرا أو ملفات الهاتف.
-                    </p>
+                    <CardTitle className="text-base">{post.author}</CardTitle>
+                    <CardDescription>
+                      {post.handle} · {post.time}
+                    </CardDescription>
                   </div>
                 </div>
-              </CardContent>
-              <CardFooter className="border-t pt-5 justify-between gap-2 flex-wrap">
-                <div className="flex gap-2 flex-wrap">
-                  <Button type="button" variant={post.liked ? "default" : "ghost"} size="sm" onClick={() => toggleLike(post.id)}>
-                    <Heart className={`w-4 h-4 ${post.liked ? "fill-current" : ""}`} />
-                    {post.likes}
-                  </Button>
-                  <div className="relative">
-                    <Button 
-                      type="button" 
-                      variant={activeCommentId === post.id ? "secondary" : "ghost"} 
-                      size="sm"
-                      onClick={() => setActiveCommentId(activeCommentId === post.id ? null : post.id)}
-                    >
-                      <MessageCircle className="w-4 h-4" />
-                      {post.comments}
-                    </Button>
-                    {activeCommentId === post.id && (
-                      <div className="absolute bottom-full mb-2 right-0 w-64 p-2 bg-card border rounded-lg shadow-xl z-50 flex gap-2">
-                        <Input 
-                          size="sm" 
-                          placeholder="اكتب تعليقاً..." 
-                          value={commentText[post.id] || ""}
-                          onChange={(e) => setCommentText({...commentText, [post.id]: e.target.value})}
-                          onKeyDown={(e) => e.key === 'Enter' && submitComment(post.id)}
-                        />
-                        <Button size="sm" onClick={() => submitComment(post.id)}>
-                          <Send className="w-3 h-3" />
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                  <Button type="button" variant="ghost" size="sm">
-                    <Send className="w-4 h-4" />
-                    {post.shares}
-                  </Button>
-                </div>
-                <div className="flex gap-2 flex-wrap">
-                  <Button type="button" variant="outline" size="sm">
-                    <ImagePlus className="w-4 h-4" />
-                    أضف وسائط
-                  </Button>
-                  <Button type="button" variant="outline" size="sm">
-                    <Sparkles className="w-4 h-4" />
-                    تحويل إلى ريل
-                  </Button>
-                </div>
-              </CardFooter>
-            </Card>
-          ))}
-        </div>
-
-        <div className="space-y-4">
-          <Card className="border-0 shadow-md">
-            <CardHeader>
-              <CardTitle>طلبات الصداقة</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {requests.map((request) => (
-                <div key={request.id} className="rounded-xl border p-4 space-y-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="font-semibold">{request.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {request.city} · {request.mutual} أصدقاء مشتركون
-                      </p>
-                    </div>
-                    <Badge variant={request.status === "accepted" ? "default" : request.status === "declined" ? "destructive" : "secondary"}>
-                      {request.status === "pending"
-                        ? "قيد الانتظار"
-                        : request.status === "accepted"
-                          ? "تم القبول"
-                          : "مرفوض"}
-                    </Badge>
-                  </div>
-                  {request.status === "pending" && (
-                    <div className="flex gap-2">
-                      <Button type="button" className="flex-1" onClick={() => updateRequestStatus(request.id, "accepted")}>
-                        <Check className="w-4 h-4" />
-                        قبول
-                      </Button>
-                      <Button type="button" variant="outline" className="flex-1" onClick={() => updateRequestStatus(request.id, "declined")}>
-                        <X className="w-4 h-4" />
-                        رفض
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card className="border-0 shadow-md">
-            <CardHeader>
-              <CardTitle>اقتراحات الصداقة</CardTitle>
+                <Badge variant="secondary">{post.category}</Badge>
+              </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              {suggestions.map((item) => (
-                <div key={item.id} className="rounded-xl border p-4 flex items-center justify-between gap-3">
-                  <div>
-                    <p className="font-semibold">{item.name}</p>
-                    <p className="text-sm text-muted-foreground">{item.bio}</p>
-                  </div>
-                  <Button type="button" variant={item.following ? "secondary" : "outline"} onClick={() => toggleSuggestionFollow(item.id)}>
-                    <UserCheck className="w-4 h-4" />
-                    {item.following ? "تتابعه" : "متابعة"}
-                  </Button>
-                </div>
-              ))}
+              <p className="leading-7">{post.text}</p>
+              {post.mediaUrl && (
+                <a href={post.mediaUrl} target="_blank" rel="noreferrer" className="text-sm text-primary underline">
+                  فتح الوسائط المرفقة
+                </a>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <Button variant={post.liked ? "default" : "outline"} size="sm" onClick={() => handleToggleLike(post.id, post.liked)}>
+                  {post.liked ? <Check className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
+                  إعجاب {post.likes}
+                </Button>
+                <Badge variant="outline">تعليقات {post.comments}</Badge>
+                <Badge variant="outline">مشاركات {post.shares}</Badge>
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  value={commentText[post.id] ?? ""}
+                  onChange={(e) => setCommentText(current => ({ ...current, [post.id]: e.target.value }))}
+                  placeholder="اكتب تعليقاً سريعاً"
+                />
+                <Button onClick={() => handleAddComment(post.id)} disabled={!commentText[post.id]?.trim() || commentMutation.isPending}>
+                  <Send className="w-4 h-4" />
+                </Button>
+              </div>
             </CardContent>
           </Card>
-        </div>
+        ))}
+      </div>
+
+      <div className="space-y-4">
+        <Card className="border-0 shadow-md">
+          <CardHeader>
+            <CardTitle>أصدقاؤك</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {(friendsQuery.data ?? []).length === 0 && <p className="text-sm text-muted-foreground">لسه ماعندكش أصدقاء على الحساب ده.</p>}
+            {(friendsQuery.data ?? []).map(friend => (
+              <div key={friend.id} className="rounded-xl border p-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-semibold">{friend.name}</p>
+                  <p className="text-sm text-muted-foreground">{friend.bio}</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" onClick={() => handleCreateConversation(friend.id, friend.name)}>
+                    <MessageCircle className="w-4 h-4" />
+                    دردشة
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={() => handleToggleFriend(friend.id, true)}>
+                    إزالة
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card className="border-0 shadow-md">
+          <CardHeader>
+            <CardTitle>اقتراحات</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {suggestions.map(user => (
+              <div key={user.id} className="rounded-xl border p-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-semibold">{user.name}</p>
+                  <p className="text-sm text-muted-foreground">{user.bio}</p>
+                </div>
+                <Button size="sm" onClick={() => handleToggleFriend(user.id, false)}>
+                  <UserPlus className="w-4 h-4" />
+                  إضافة
+                </Button>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
 
   const renderChat = () => (
-    <div className="grid gap-4 lg:grid-cols-[340px,1fr]">
+    <div className="grid gap-4 lg:grid-cols-[320px,1fr]">
       <Card className="border-0 shadow-md">
         <CardHeader>
           <CardTitle>المحادثات</CardTitle>
+          <CardDescription>القائمة والرسائل شغالة مباشرة من الـ API.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          {chatThreads.map((thread) => (
+          {(conversationsQuery.data ?? []).map(conversation => (
             <button
-              key={thread.id}
+              key={conversation.id}
               type="button"
-              onClick={() => setSelectedChatId(thread.id)}
-              className={`w-full rounded-2xl border p-4 text-right transition ${
-                selectedChatId === thread.id ? "border-primary bg-primary/10" : "hover:bg-muted/60"
-              }`}
+              onClick={() => setSelectedConversationId(conversation.id)}
+              className={`w-full rounded-xl border p-3 text-right transition ${selectedConversationId === conversation.id ? "border-primary bg-primary/10" : "hover:bg-muted/60"}`}
             >
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold">{thread.name}</span>
-                    {thread.online && <span className="size-2 rounded-full bg-green-500" />}
-                  </div>
-                  <p className="text-sm text-muted-foreground mt-1 line-clamp-1">{thread.lastMessage}</p>
+                  <p className="font-semibold">{conversation.name}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{conversation.time}</p>
                 </div>
-                <div className="text-left">
-                  <p className="text-xs text-muted-foreground">{thread.time}</p>
-                  {thread.unread > 0 && <Badge className="mt-2">{thread.unread}</Badge>}
-                </div>
+                {conversation.unread > 0 && <Badge>{conversation.unread}</Badge>}
               </div>
             </button>
           ))}
+
+          {!(conversationsQuery.data ?? []).length && (
+            <p className="text-sm text-muted-foreground">ابدأ محادثة من قائمة الأصدقاء أو الاقتراحات.</p>
+          )}
         </CardContent>
       </Card>
 
       <Card className="border-0 shadow-md min-h-[70vh]">
-        <CardHeader className="border-b pb-5">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <CardTitle>{selectedChat.name}</CardTitle>
-              <p className="text-sm text-muted-foreground mt-1">
-                دردشة فورية مع إرسال صور وفيديوهات وملفات.
-              </p>
-            </div>
-            <div className="flex gap-2">
-              <Button type="button" variant="outline" size="icon">
-                <Phone className="w-4 h-4" />
-              </Button>
-              <Button type="button" variant="outline" size="icon">
-                <Video className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
+        <CardHeader>
+          <CardTitle>{selectedConversation?.name ?? "اختر محادثة"}</CardTitle>
+          <CardDescription>إرسال واستقبال الرسائل من الـ API مباشرة.</CardDescription>
         </CardHeader>
-        <CardContent className="flex-1 py-6 space-y-3">
-          {selectedChat.messages.map((message) => (
-            <div
-              key={message.id}
-              className={`max-w-[80%] rounded-2xl px-4 py-3 ${
-                message.mine
-                  ? "mr-auto bg-primary text-primary-foreground"
-                  : "bg-secondary text-secondary-foreground"
-              }`}
-            >
+        <CardContent className="space-y-3 min-h-[50vh]">
+          {(messagesQuery.data ?? []).map(message => (
+            <div key={message.id} className={`max-w-[80%] rounded-2xl px-4 py-3 ${message.mine ? "mr-auto bg-primary text-primary-foreground" : "bg-secondary"}`}>
+              {!message.mine && <p className="text-xs mb-1 opacity-80">{message.senderName}</p>}
               <p>{message.text}</p>
-              <p className={`text-xs mt-2 ${message.mine ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
-                {message.time}
-              </p>
+              <p className="text-xs mt-2 opacity-70">{message.time}</p>
             </div>
           ))}
+          {selectedConversationId && !(messagesQuery.data ?? []).length && !messagesQuery.isLoading && (
+            <p className="text-sm text-muted-foreground">لا توجد رسائل بعد، ابدأ أول رسالة الآن.</p>
+          )}
         </CardContent>
-        <CardFooter className="border-t pt-5 gap-3 flex-wrap">
-          <Button type="button" variant="outline" size="icon">
-            <Camera className="w-4 h-4" />
-          </Button>
-          <Button type="button" variant="outline" size="icon">
-            <Upload className="w-4 h-4" />
-          </Button>
+        <CardFooter className="border-t pt-4 gap-3 flex-wrap">
           <Input
             value={chatMessage}
             onChange={(e) => setChatMessage(e.target.value)}
-            placeholder="اكتب رسالتك..."
-            className="flex-1 h-11"
+            placeholder={selectedConversationId ? "اكتب رسالتك..." : "اختر محادثة أولاً"}
+            disabled={!selectedConversationId}
+            className="flex-1"
+            onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
           />
-          <Button type="button" onClick={sendChatMessage} disabled={!chatMessage.trim()}>
+          <Button onClick={handleSendMessage} disabled={!selectedConversationId || !chatMessage.trim() || sendMessageMutation.isPending}>
             <Send className="w-4 h-4" />
             إرسال
           </Button>
@@ -781,72 +504,46 @@ export default function SocialApp() {
     </div>
   );
 
-  const renderReels = () => (
+  const renderStories = () => (
     <div className="space-y-4">
       <Card className="border-0 shadow-md">
         <CardHeader>
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div>
-              <CardTitle>ريلز الفيديوهات القصيرة</CardTitle>
-              <p className="text-sm text-muted-foreground mt-1">
-                انشر، أعجب، علّق، وشارك المحتوى القصير بسرعة.
-              </p>
-            </div>
-            <div className="flex gap-2 flex-wrap">
-              <Button type="button" variant="outline">
-                <Camera className="w-4 h-4" />
-                تصوير ريل
-              </Button>
-              <Button type="button">
-                <CirclePlus className="w-4 h-4" />
-                نشر ريل
-              </Button>
-            </div>
-          </div>
+          <CardTitle>نشر ستوري</CardTitle>
+          <CardDescription>أضف رابط صورة أو فيديو وسيتم إنشاء ستوري عبر الـ API.</CardDescription>
         </CardHeader>
+        <CardContent className="space-y-3">
+          <Input value={storyForm.mediaUrl} onChange={(e) => setStoryForm(current => ({ ...current, mediaUrl: e.target.value }))} placeholder="https://example.com/image.jpg" />
+          <div className="flex gap-2">
+            <Button variant={storyForm.mediaType === "image" ? "default" : "outline"} onClick={() => setStoryForm(current => ({ ...current, mediaType: "image" }))}>صورة</Button>
+            <Button variant={storyForm.mediaType === "video" ? "default" : "outline"} onClick={() => setStoryForm(current => ({ ...current, mediaType: "video" }))}>فيديو</Button>
+            <Button onClick={handleCreateStory} disabled={!storyForm.mediaUrl.trim() || createStoryMutation.isPending}>
+              {createStoryMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <CirclePlus className="w-4 h-4" />}
+              نشر ستوري
+            </Button>
+          </div>
+        </CardContent>
       </Card>
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        {reelItems.map((reel) => (
-          <Card key={reel.id} className="border-0 shadow-md overflow-hidden">
-            <div className="bg-gradient-to-b from-zinc-800 via-zinc-900 to-black min-h-[28rem] p-6 text-white flex flex-col justify-between">
-              <div className="flex items-center justify-between">
-                <Badge className="bg-white/15 text-white hover:bg-white/15">ريلز</Badge>
-                <Button type="button" variant="secondary" size="sm">
-                  <Sparkles className="w-4 h-4" />
-                  فلتر
-                </Button>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {(storiesQuery.data ?? []).map(story => (
+          <Card key={story.id} className="border-0 shadow-md">
+            <CardHeader>
+              <CardTitle className="text-base">{story.creator}</CardTitle>
+              <CardDescription>{story.title} · {story.time}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="rounded-2xl border bg-muted/40 p-4 min-h-36 flex items-center justify-center text-center">
+                <div>
+                  <p className="font-medium">{story.mediaType === "video" ? "معاينة ستوري فيديو" : "معاينة ستوري صورة"}</p>
+                  <p className="text-sm text-muted-foreground mt-2">المشاهدات: {story.views}</p>
+                </div>
               </div>
-              <div>
-                <p className="text-lg font-semibold">{reel.title}</p>
-                <p className="text-white/70 mt-2">بواسطة {reel.creator}</p>
-              </div>
-            </div>
-            <CardFooter className="justify-between gap-2 flex-wrap border-t pt-5">
-              <div className="flex gap-2 flex-wrap">
-                <Button type="button" variant="ghost" size="sm">
-                  <Heart className="w-4 h-4" />
-                  {reel.likes}
-                </Button>
-                <Button type="button" variant="ghost" size="sm">
-                  <MessageCircle className="w-4 h-4" />
-                  {reel.comments}
-                </Button>
-                <Button type="button" variant="ghost" size="sm">
-                  <Send className="w-4 h-4" />
-                  {reel.shares}
-                </Button>
-              </div>
-              <div className="flex gap-2">
-                <Button type="button" variant="outline" size="sm">
-                  <Upload className="w-4 h-4" />
-                  نشر
-                </Button>
-                <Button type="button" variant="outline" size="sm">
-                  <ImagePlus className="w-4 h-4" />
-                  تعليق
-                </Button>
-              </div>
+              <a href={story.mediaUrl} target="_blank" rel="noreferrer" className="text-sm text-primary underline">فتح رابط الوسائط</a>
+            </CardContent>
+            <CardFooter>
+              <Button onClick={() => handleViewStory(story.id, story.mediaUrl)} className="w-full">
+                مشاهدة الستوري
+              </Button>
             </CardFooter>
           </Card>
         ))}
@@ -858,193 +555,39 @@ export default function SocialApp() {
     <div className="space-y-4">
       <Card className="border-0 shadow-md">
         <CardHeader>
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div>
-              <CardTitle>البث المباشر</CardTitle>
-              <p className="text-sm text-muted-foreground mt-1">
-                شاهد من يبث الآن، استقبل الدعوات، واطلب الانضمام مع فلاتر جاهزة.
-              </p>
-            </div>
-            <div className="flex gap-2 flex-wrap">
-              <Button type="button" variant="outline">
-                <Filter className="w-4 h-4" />
-                فلاتر البث
-              </Button>
-              <Button type="button">
-                <Video className="w-4 h-4" />
-                ابدأ بث مباشر
-              </Button>
-            </div>
-          </div>
+          <CardTitle>ابدأ بث مباشر</CardTitle>
+          <CardDescription>بدء وإنهاء البث تم ربطه بالـ API المباشر.</CardDescription>
         </CardHeader>
-      </Card>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {liveHosts.map((host) => (
-          <Card key={host.id} className="border-0 shadow-md">
-            <CardContent className="pt-6 space-y-4">
-              <div className="rounded-2xl min-h-52 bg-gradient-to-br from-rose-500/20 via-orange-400/10 to-primary/20 p-4 flex flex-col justify-between">
-                <div className="flex items-center justify-between">
-                  <Badge className="bg-red-600 text-white hover:bg-red-600">مباشر الآن</Badge>
-                  <Badge variant="secondary">فلتر: {host.filter}</Badge>
-                </div>
-                <div>
-                  <p className="text-lg font-semibold">{host.title}</p>
-                  <p className="text-sm text-muted-foreground mt-1">{host.name}</p>
-                </div>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">المشاهدون: {host.viewers}</span>
-                <Button type="button" variant="ghost" size="sm">
-                  <Gift className="w-4 h-4" />
-                  إرسال هدية
-                </Button>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <Button type="button" variant={host.invited ? "secondary" : "outline"} onClick={() => toggleLiveInvite(host.id)}>
-                  <Users className="w-4 h-4" />
-                  {host.invited ? "تمت دعوتك" : "دعوة للبث"}
-                </Button>
-                <Button type="button" onClick={() => toggleJoinRequest(host.id)} variant={host.joinRequested ? "secondary" : "default"}>
-                  <ChevronLeft className="w-4 h-4" />
-                  {host.joinRequested ? "الطلب مُرسل" : "طلب انضمام"}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-    </div>
-  );
-
-  const renderNotifications = () => (
-    <div className="space-y-4">
-      <Card className="border-0 shadow-md">
-        <CardHeader>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <CardTitle>الإشعارات</CardTitle>
-              <p className="text-sm text-muted-foreground mt-1">كل التنبيهات الخاصة بالصداقة، السوق، البث والمجموعات.</p>
-            </div>
-            <Badge>{unreadNotifications} جديد</Badge>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {notificationsSeed.map((item) => (
-            <div key={item.id} className="rounded-2xl border p-4 flex items-start justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p className="font-semibold">{item.title}</p>
-                  <Badge variant="secondary">{item.type}</Badge>
-                </div>
-                <p className="text-sm text-muted-foreground mt-2">{item.description}</p>
-              </div>
-              <Button type="button" variant="ghost" size="sm">عرض</Button>
-            </div>
-          ))}
+        <CardContent className="flex flex-col gap-3 sm:flex-row">
+          <Input value={liveTitle} onChange={(e) => setLiveTitle(e.target.value)} placeholder="عنوان البث" className="flex-1" />
+          <Button onClick={handleStartLive} disabled={!liveTitle.trim() || startLiveMutation.isPending}>
+            {startLiveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Video className="w-4 h-4" />}
+            ابدأ الآن
+          </Button>
         </CardContent>
       </Card>
-    </div>
-  );
-
-  const renderMarket = () => (
-    <div className="space-y-4">
-      <Card className="border-0 shadow-md bg-gradient-to-br from-primary/10 via-card to-accent/10">
-        <CardHeader>
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div>
-              <CardTitle>متجر التسوق الإلكتروني</CardTitle>
-              <p className="text-sm text-muted-foreground mt-1">
-                أنشئ صفحة متجر، أضف منتجات، وانشر عروضك داخل السوق مباشرة.
-              </p>
-            </div>
-            <div className="flex gap-2 flex-wrap">
-              <Dialog>
-                <DialogTrigger asChild>
-                  <Button type="button">
-                    <Package className="w-4 h-4" />
-                    نشر منتج في السوق
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>نشر منتج جديد</DialogTitle>
-                    <DialogDescription>أدخل تفاصيل المنتج ليظهر في السوق الإلكتروني.</DialogDescription>
-                  </DialogHeader>
-                  <div className="space-y-4 py-4">
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">اسم المنتج</label>
-                      <Input 
-                        placeholder="مثال: سماعات لاسلكية" 
-                        value={marketForm.name}
-                        onChange={(e) => setMarketForm({...marketForm, name: e.target.value})}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">السعر</label>
-                      <Input 
-                        placeholder="مثال: 500 ج.م" 
-                        value={marketForm.price}
-                        onChange={(e) => setMarketForm({...marketForm, price: e.target.value})}
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">اسم المتجر</label>
-                        <Input 
-                          placeholder="متجري" 
-                          value={marketForm.store}
-                          onChange={(e) => setMarketForm({...marketForm, store: e.target.value})}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">المدينة</label>
-                        <Input 
-                          placeholder="القاهرة" 
-                          value={marketForm.city}
-                          onChange={(e) => setMarketForm({...marketForm, city: e.target.value})}
-                        />
-                      </div>
-                    </div>
-                    <Button className="w-full" onClick={handlePublishProduct}>نشر الآن</Button>
-                  </div>
-                </DialogContent>
-              </Dialog>
-              <Button type="button" variant="outline">
-                <Store className="w-4 h-4" />
-                إدارة متجري
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-      </Card>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {products.map((product) => (
-          <Card key={product.id} className="border-0 shadow-md overflow-hidden">
-            <div className="min-h-44 bg-gradient-to-br from-secondary via-primary/10 to-accent/20 flex items-center justify-center">
-              <ShoppingBag className="w-12 h-12 text-primary" />
-            </div>
-            <CardContent className="pt-6 space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="font-semibold">{product.name}</h3>
-                <Badge>{product.price}</Badge>
+        {(liveQuery.data ?? []).map(stream => (
+          <Card key={stream.id} className="border-0 shadow-md">
+            <CardHeader>
+              <div className="flex items-center justify-between gap-2">
+                <Badge variant={stream.status === "ended" ? "secondary" : "destructive"}>{stream.status === "ended" ? "منتهي" : "مباشر"}</Badge>
+                <Badge variant="outline">{stream.viewers} مشاهد</Badge>
               </div>
-              <p className="text-sm text-muted-foreground">{product.store}</p>
-              <div className="flex items-center justify-between text-sm text-muted-foreground">
-                <span>{product.city}</span>
-                <span>{product.posted}</span>
-              </div>
-            </CardContent>
-            <CardFooter className="border-t pt-5 justify-between gap-2">
-              <Button type="button" variant="outline" size="sm">
-                <Send className="w-4 h-4" />
-                مشاركة
-              </Button>
-              <Button type="button" size="sm">
-                <CirclePlus className="w-4 h-4" />
-                تواصل مع البائع
-              </Button>
+              <CardTitle className="text-base">{stream.title}</CardTitle>
+              <CardDescription>{stream.host} · {stream.startedAt}</CardDescription>
+            </CardHeader>
+            <CardFooter>
+              {stream.canEnd ? (
+                <Button variant="outline" className="w-full" onClick={() => handleEndLive(stream.id)}>
+                  إنهاء البث
+                </Button>
+              ) : (
+                <Button variant="secondary" className="w-full" disabled>
+                  عرض الحالة فقط
+                </Button>
+              )}
             </CardFooter>
           </Card>
         ))}
@@ -1052,231 +595,165 @@ export default function SocialApp() {
     </div>
   );
 
-  const renderSettings = () => (
-    <div className="space-y-4">
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="border-0 shadow-md">
-          <CardHeader>
-            <CardTitle>إعدادات الحساب والخصوصية</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="rounded-2xl border p-4 flex items-center justify-between gap-3">
-              <div>
-                <p className="font-semibold">إدارة الحظر</p>
-                <p className="text-sm text-muted-foreground">حظر الحسابات المزعجة والتحكم في ظهورك.</p>
+  const renderNotifications = () => (
+    <Card className="border-0 shadow-md">
+      <CardHeader>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <CardTitle>الإشعارات</CardTitle>
+            <CardDescription>قراءة الإشعارات وتحديث حالتها من الـ API.</CardDescription>
+          </div>
+          <div className="flex gap-2">
+            <Badge>{unreadNotifications} غير مقروء</Badge>
+            <Button variant="outline" onClick={handleMarkAllNotifications} disabled={markAllNotificationsMutation.isPending || !(notificationsQuery.data ?? []).length}>
+              تعليم الكل كمقروء
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {(notificationsQuery.data ?? []).map(item => (
+          <div key={item.id} className="rounded-2xl border p-4 flex items-start justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="font-semibold">{item.title}</p>
+                <Badge variant="secondary">{item.type}</Badge>
+                {!item.isRead && <Badge>جديد</Badge>}
               </div>
-              <Button type="button" variant="outline">
-                <Shield className="w-4 h-4" />
-                فتح القائمة
-              </Button>
+              <p className="text-sm text-muted-foreground mt-2">{item.description}</p>
+              <p className="text-xs text-muted-foreground mt-2">{item.time}</p>
             </div>
-            <div className="rounded-2xl border p-4 flex items-center justify-between gap-3">
-              <div>
-                <p className="font-semibold">طلبات المتابعة والصداقة</p>
-                <p className="text-sm text-muted-foreground">راجع الطلبات والاقتراحات من مكان واحد.</p>
-              </div>
-              <Badge>{pendingRequests} طلبات جديدة</Badge>
-            </div>
-            <div className="rounded-2xl border p-4 flex items-center justify-between gap-3">
-              <div>
-                <p className="font-semibold">خيارات الرفع الافتراضية</p>
-                <p className="text-sm text-muted-foreground">الاختيار بين الكاميرا أو ملفات الهاتف مباشرة.</p>
-              </div>
-              <div className="flex gap-2">
-                <Badge variant="secondary">كاميرا</Badge>
-                <Badge variant="secondary">ملفات</Badge>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            <Button variant="ghost" onClick={() => handleMarkNotification(item.id)} disabled={item.isRead || markNotificationMutation.isPending}>
+              تمّت القراءة
+            </Button>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
 
-        <Card className="border-0 shadow-md">
-          <CardHeader>
-            <CardTitle>المجموعات وطلبات الانضمام</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {groups.map((group) => (
-              <div key={group.id} className="rounded-2xl border p-4 flex items-center justify-between gap-3">
-                <div>
-                  <p className="font-semibold">{group.name}</p>
-                  <p className="text-sm text-muted-foreground">{group.members}</p>
-                </div>
-                <Button type="button" variant={group.requestSent ? "secondary" : "outline"} onClick={() => toggleGroupRequest(group.id)}>
-                  <Users className="w-4 h-4" />
-                  {group.requestSent ? "تم إرسال الطلب" : "طلب انضمام"}
-                </Button>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
+  const renderMarket = () => (
+    <div className="space-y-4">
+      <Card className="border-0 shadow-md">
+        <CardHeader>
+          <CardTitle>نشر منتج جديد</CardTitle>
+          <CardDescription>السوق متصل مباشرة بالـ API.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <Input value={marketForm.name} onChange={(e) => setMarketForm(current => ({ ...current, name: e.target.value }))} placeholder="اسم المنتج" />
+          <Input value={marketForm.price} onChange={(e) => setMarketForm(current => ({ ...current, price: e.target.value }))} placeholder="السعر" />
+          <Input value={marketForm.city} onChange={(e) => setMarketForm(current => ({ ...current, city: e.target.value }))} placeholder="المدينة" />
+          <Button onClick={handleCreateMarketItem} disabled={!marketForm.name || !marketForm.price || createMarketMutation.isPending}>
+            نشر المنتج
+          </Button>
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {(marketQuery.data ?? []).map(product => (
+          <Card key={product.id} className="border-0 shadow-md">
+            <CardHeader>
+              <CardTitle className="text-base">{product.name}</CardTitle>
+              <CardDescription>{product.store}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <Badge>{product.price}</Badge>
+              <p className="text-sm text-muted-foreground">{product.city}</p>
+              <p className="text-sm text-muted-foreground">{product.posted}</p>
+              <p className="text-sm leading-6">{product.description}</p>
+            </CardContent>
+          </Card>
+        ))}
       </div>
     </div>
   );
 
-  const renderActivePage = () => {
-    switch (activeTab) {
-      case "chat":
-        return renderChat();
-      case "reels":
-        return renderReels();
-      case "live":
-        return renderLive();
-      case "notifications":
-        return renderNotifications();
-      case "market":
-        return renderMarket();
-      case "settings":
-        return renderSettings();
-      case "feed":
-      default:
-        return renderFeed();
-    }
-  };
+  const renderSettings = () => (
+    <div className="grid gap-4 xl:grid-cols-[1.4fr,1fr]">
+      <Card className="border-0 shadow-md">
+        <CardHeader>
+          <CardTitle>المجموعات</CardTitle>
+          <CardDescription>الانضمام والمغادرة شغالين بالـ API.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {(groupsQuery.data ?? []).map(group => (
+            <div key={group.id} className="rounded-2xl border p-4 flex items-center justify-between gap-3">
+              <div>
+                <p className="font-semibold">{group.name}</p>
+                <p className="text-sm text-muted-foreground">{group.description}</p>
+                <p className="text-xs text-muted-foreground mt-1">{group.members}</p>
+              </div>
+              <Button variant={group.joined ? "secondary" : "default"} onClick={() => handleToggleGroup(group.id, group.joined)}>
+                {group.joined ? "مغادرة" : "انضمام"}
+              </Button>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
+      <Card className="border-0 shadow-md">
+        <CardHeader>
+          <CardTitle>الحساب</CardTitle>
+          <CardDescription>بيانات الحساب الحالي من جلسة الـ API.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="rounded-2xl border p-4">
+            <p className="font-semibold">{currentUser?.name}</p>
+            <p className="text-sm text-muted-foreground mt-1">{currentUser?.email ?? currentUser?.phone_number ?? "بدون وسيلة تواصل"}</p>
+          </div>
+          <Button variant="outline" className="w-full" onClick={async () => { await invalidateCommon(); toast.success("تم تحديث البيانات من السيرفر"); }}>
+            تحديث كل البيانات
+          </Button>
+          <Button variant="destructive" className="w-full" onClick={handleLogout}>
+            <LogOut className="w-4 h-4" />
+            تسجيل الخروج
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-secondary/20 pb-28">
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-0 right-0 h-72 w-72 rounded-full bg-primary/10 blur-3xl" />
-        <div className="absolute bottom-0 left-0 h-80 w-80 rounded-full bg-accent/10 blur-3xl" />
-      </div>
-
-      <header className="sticky top-0 z-30 border-b bg-background/80 backdrop-blur-xl">
-        <div className="container py-4 flex items-center justify-between gap-3">
+    <div className="min-h-screen bg-gradient-to-br from-background via-background to-secondary/20">
+      <header className="sticky top-0 z-20 border-b bg-background/90 backdrop-blur">
+        <div className="mx-auto max-w-7xl px-4 py-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h1 className="text-2xl font-bold gradient-text">يامن شات</h1>
-            <p className="text-sm text-muted-foreground">شبكة اجتماعية متكاملة للمنشورات والدردشة والبث والسوق</p>
+            <h1 className="text-2xl font-bold">يامن شات — Web API-first</h1>
+            <p className="text-sm text-muted-foreground">مرحباً {currentUser?.name}، الجزء المتبقي من الواجهة بقى مربوط بالـ API.</p>
           </div>
-
-          <div className="flex items-center gap-2">
-            <Dialog>
-              <DialogTrigger asChild>
-                <Button type="button" variant="outline" size="icon">
-                  <Search className="w-4 h-4" />
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="sm:max-w-2xl">
-                <DialogHeader>
-                  <DialogTitle>البحث داخل التطبيق</DialogTitle>
-                  <DialogDescription>
-                    ابحث عن منشورات، أصدقاء، منتجات، مجموعات أو بث مباشر.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4">
-                  <Input
-                    value={searchValue}
-                    onChange={(e) => setSearchValue(e.target.value)}
-                    placeholder="ابحث عن أي شيء..."
-                    className="h-11"
-                  />
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Card className="border shadow-none">
-                      <CardContent className="pt-6 space-y-2">
-                        <p className="font-semibold">نتائج سريعة</p>
-                        <p className="text-sm text-muted-foreground">منشورات تقنية، مجموعات التصميم، وسوق الأدوات.</p>
-                      </CardContent>
-                    </Card>
-                    <Card className="border shadow-none">
-                      <CardContent className="pt-6 space-y-2">
-                        <p className="font-semibold">الأكثر بحثاً</p>
-                        <p className="text-sm text-muted-foreground">ريلز، بث مباشر، طلبات الصداقة، ونشر منتج.</p>
-                      </CardContent>
-                    </Card>
-                  </div>
-                </div>
-              </DialogContent>
-            </Dialog>
-
-            <Sheet>
-              <SheetTrigger asChild>
-                <Button type="button" variant="outline" size="icon">
-                  <Menu className="w-4 h-4" />
-                </Button>
-              </SheetTrigger>
-              <SheetContent side="left" className="w-full sm:max-w-md">
-                <SheetHeader>
-                  <SheetTitle>اختصارات التطبيق</SheetTitle>
-                  <SheetDescription>وصول سريع إلى أهم الخدمات الاجتماعية داخل الواجهة.</SheetDescription>
-                </SheetHeader>
-                <div className="px-4 pb-6 grid gap-3">
-                  {[
-                    "إنشاء منشور جديد",
-                    "رفع من الكاميرا",
-                    "رفع من ملفات الهاتف",
-                    "إدارة طلبات الصداقة",
-                    "متابعة الحسابات",
-                    "إرسال طلب انضمام لمجموعة",
-                    "استقبال دعوات البث المباشر",
-                  ].map((item) => (
-                    <div key={item} className="rounded-2xl border p-4 text-sm text-muted-foreground bg-card">
-                      {item}
-                    </div>
-                  ))}
-                  <Button type="button" variant="outline" onClick={() => setLocation("/welcome")}>
-                    العودة لصفحة الترحيب
-                  </Button>
-                </div>
-              </SheetContent>
-            </Sheet>
-          </div>
-        </div>
-      </header>
-
-      <main className="container relative z-10 py-6 space-y-6">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <Card className="border-0 shadow-sm">
-            <CardContent className="pt-6">
-              <p className="text-sm text-muted-foreground">طلبات الصداقة</p>
-              <p className="text-2xl font-bold mt-1">{pendingRequests}</p>
-            </CardContent>
-          </Card>
-          <Card className="border-0 shadow-sm">
-            <CardContent className="pt-6">
-              <p className="text-sm text-muted-foreground">الإشعارات الجديدة</p>
-              <p className="text-2xl font-bold mt-1">{unreadNotifications}</p>
-            </CardContent>
-          </Card>
-          <Card className="border-0 shadow-sm">
-            <CardContent className="pt-6">
-              <p className="text-sm text-muted-foreground">البثوث النشطة الآن</p>
-              <p className="text-2xl font-bold mt-1">{liveHosts.length}</p>
-            </CardContent>
-          </Card>
-          <Card className="border-0 shadow-sm">
-            <CardContent className="pt-6">
-              <p className="text-sm text-muted-foreground">منتجات السوق</p>
-              <p className="text-2xl font-bold mt-1">{products.length}</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {renderActivePage()}
-      </main>
-
-      <div className="fixed bottom-0 inset-x-0 z-40 border-t bg-background/95 backdrop-blur-xl">
-        <div className="container py-3 overflow-x-auto">
-          <div className="flex items-center justify-between gap-2 min-w-max">
-            {navItems.map((item) => {
+          <div className="flex items-center gap-2 flex-wrap">
+            {navItems.map(item => {
               const Icon = item.icon;
-              const active = activeTab === item.key;
               return (
-                <Button
-                  key={item.key}
-                  type="button"
-                  variant={active ? "default" : "ghost"}
-                  className="flex-col h-auto py-2 px-3 min-w-20"
-                  onClick={() => setActiveTab(item.key)}
-                >
+                <Button key={item.key} variant={activeTab === item.key ? "default" : "outline"} onClick={() => setActiveTab(item.key)}>
                   <Icon className="w-4 h-4" />
-                  <span className="text-xs">{item.label}</span>
-                  {item.key === "notifications" && unreadNotifications > 0 ? (
-                    <Badge className="mt-1">{unreadNotifications}</Badge>
-                  ) : null}
+                  {item.label}
+                  {item.key === "notifications" && unreadNotifications > 0 && <Badge className="mr-1">{unreadNotifications}</Badge>}
                 </Button>
               );
             })}
           </div>
         </div>
-      </div>
+      </header>
+
+      <main className="mx-auto max-w-7xl px-4 py-6 space-y-6">
+        {isBusy && (
+          <Card className="border-primary/30 bg-primary/5">
+            <CardContent className="py-3 flex items-center gap-3 text-sm">
+              <Loader2 className="w-4 h-4 animate-spin text-primary" />
+              جارٍ تنفيذ العملية ورفع التحديثات من وإلى الـ API...
+            </CardContent>
+          </Card>
+        )}
+
+        {activeTab === "feed" && renderFeed()}
+        {activeTab === "chat" && renderChat()}
+        {activeTab === "stories" && renderStories()}
+        {activeTab === "live" && renderLive()}
+        {activeTab === "notifications" && renderNotifications()}
+        {activeTab === "market" && renderMarket()}
+        {activeTab === "settings" && renderSettings()}
+      </main>
     </div>
   );
 }

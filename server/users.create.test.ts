@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
 
@@ -11,11 +11,40 @@ function createPublicContext(): TrpcContext {
     } as TrpcContext["req"],
     res: {
       clearCookie: vi.fn(),
+      cookie: vi.fn(),
     } as unknown as TrpcContext["res"],
   };
 }
 
 describe("users.create", () => {
+  beforeEach(() => {
+    vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      headers: { get: () => "application/json" },
+      json: async () => ({
+        access_token: "access-token",
+        refresh_token: "refresh-token",
+        token_type: "bearer",
+        expires_in: 3600,
+        user_id: "user-1",
+        display_name: "محمد أحمد",
+        profile: {
+          id: "profile-1",
+          user_id: "user-1",
+          first_name: "محمد",
+          last_name: "أحمد",
+          display_name: "محمد أحمد",
+          contact_method: "phone",
+          contact: "966501234567",
+          created_at: new Date().toISOString(),
+        },
+      }),
+    } as Response);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
   it("should create a user with valid input", async () => {
     const ctx = createPublicContext();
     const caller = appRouter.createCaller(ctx);
@@ -29,8 +58,9 @@ describe("users.create", () => {
     });
 
     expect(result).toHaveProperty("success", true);
-    expect(result).toHaveProperty("userId");
+    expect(result).toHaveProperty("userId", "user-1");
     expect(result).toHaveProperty("message");
+    expect((ctx.res as unknown as { cookie: ReturnType<typeof vi.fn> }).cookie).toHaveBeenCalled();
   });
 
   it("should fail with empty firstName", async () => {
