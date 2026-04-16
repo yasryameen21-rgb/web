@@ -43,3 +43,4 @@ function writeToLogFile(source: string, entries: any[]) {
       });
       fs.appendFileSync(logPath, `${lines.join("\n")}\n`, "utf-8");
       trimLogFile(logPath, MAX_LOG_SIZE_BYTES)
+});
