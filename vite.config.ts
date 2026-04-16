@@ -4,11 +4,7 @@ import react from "@vitejs/plugin-react";
 import fs from "node:fs";
 import path from "node:path";
 import { defineConfig, type Plugin, type ViteDevServer } from "vite";
-
-
 MAX_LOG_SIZE_BYTES * 0.6); // Trim to 60% to avoid constant re-trimming
-
-type LogSource = "browserConsole" | "networkRequests" | "sessionReplay";
 
 function ensureLogDir() {
   if (!fs.existsSync(LOG_DIR)) {
@@ -27,12 +23,7 @@ function trimLogFile(logPath: string, maxSize: number) {
 
     // Keep newest lines (from end) that fit within 60% of maxSize
     const targetSize = TRIM_TARGET_BYTES;
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const lineBytes = Buffer.byteLength(`${lines[i]}\n`, "utf-8");
-      if (keptBytes + lineBytes > targetSize) break;
-      keptLines.unshift(lines[i]);
-      keptBytes += lineBytes;
-    }
+ 
 
     fs.writeFileSync(logPath, keptLines.join("\n"), "utf-8");
   } catch {
