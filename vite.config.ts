@@ -66,6 +66,14 @@ function vitePluginManusDebugCollector(): Plugin {
                                                 ],
                         };
               },
-              configureServer(server: ViteDevServer) {
-                        server.middlewares.use("/__manus__/logs", (req, res, next) => {
-                                    if (req.method 
+                    configureServer(server: ViteDevServer) {
+        server.middlewares.use("/__manus__/logs", (req, res, next) => {
+          if (req.method === 'POST') {
+             // كود المعالجة هنا
+          }
+          next();
+        });
+      }
+    }
+  ]
+});
