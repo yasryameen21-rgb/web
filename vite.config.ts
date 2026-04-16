@@ -14,7 +14,6 @@ function ensureLogDir() {
   if (!fs.existsSync(LOG_DIR)) {
     fs.mkdirSync(LOG_DIR, { recursive: true });
   }
-}
 
 function trimLogFile(logPath: string, maxSize: number) {
   try {
