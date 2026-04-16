@@ -33,7 +33,6 @@ function ensureLogDir() {
   }
 
 //  fs.writeFileSync(logPath, keptLines.join("\n") + "\n", "utf-8");
-}
 
 function writeToLogFile(source: string, entries: any[]) {
       ensureLogDir();
