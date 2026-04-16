@@ -42,38 +42,4 @@ function writeToLogFile(source: string, entries: any[]) {
               return `[${ts}] ${JSON.stringify(entry)}`;
       });
       fs.appendFileSync(logPath, `${lines.join("\n")}\n`, "utf-8");
-      trimLogFile(logPath, MAX_LOG_SIZE_BYTES);
-}
-
-function vitePluginManusDebugCollector(): Plugin {
-      return {
-              name: "manus-debug-collector",
-              transformIndexHtml(html) {
-                        if (process.env.NODE_ENV === "production") {
-                                    return html;
-                        }
-                        return {
-                                    html,
-                                    tags: [
-                                        {
-                                                        tag: "script",
-                                                        attrs: {
-                                                                          src: "/__manus__/debug-collector.js",
-                                                                          defer: true,
-                                                        },
-                                                        injectTo: "head",
-                                        },
-                                                ],
-                        };
-              },
-                    configureServer(server: ViteDevServer) {
-        server.middlewares.use("/__manus__/logs", (req, res, next) => {
-          if (req.method === 'POST') {
-             // كود المعالجة هنا
-          }
-          next();
-        });
-      }
-    }
-  ]
-});
+      trimLogFile(logPath, MAX_LOG_SIZE_BYTES)
