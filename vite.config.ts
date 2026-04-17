@@ -1,46 +1,32 @@
 import { jsxLocPlugin } from "@builder.io/vite-plugin-jsx-loc";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-//import fs from "node:fs";
 import path from "node:path";
-import { defineConfig, type Plugin, type ViteDevServer } from "vite";
+import { fileURLToPath } from "node:url";
+import { defineConfig } from "vite";
 
-const LOG_DIR = path.join(process.cwd(), ".manus", "logs");
-const MAX_LOG_SIZE_BYTES = 1024 * 1024; // 1MB
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-function ensureLogDir() {
-      if (!fs.existsSync(LOG_DIR)) {
-              fs.mkdirSync(LOG_DIR, { recursive: true });
-      }
-}
-
-//function trimLogFile(logPath: string, maxSize: number) {
-    //  if (!fs.existsSync(logPath)) return;
-     // const stats = fs.statSync(logPath);
-      if (stats.size <= maxSize) return;
-
-  const targetSize = Math.floor(maxSize * 0.6); // Trim to 60% to avoid constant re-trimming
-  const lines = fs.readFileSync(logPath, "utf-8").split("\n");
-      const keptLines: string[] = [];
-      let keptBytes = 0;
-
-  for (let i = lines.length - 1; i >= 0; i--) {
-          const line = lines[i];
-          const lineBytes = Buffer.byteLength(line, "utf-8") + 1;
-          if (keptBytes + lineBytes > targetSize) break;
-          keptLines.unshift(line);
-          keptBytes += lineBytes;
-  }
-
-//  fs.writeFileSync(logPath, keptLines.join("\n") + "\n", "utf-8");
-
-function writeToLogFile(source: string, entries: any[]) {
-      ensureLogDir();
-      const logPath = path.join(LOG_DIR, `${source}.log`);
-      const lines = entries.map((entry) => {
-              const ts = new Date().toISOString();
-              return `[${ts}] ${JSON.stringify(entry)}`;
-      });
-      fs.appendFileSync(logPath, `${lines.join("\n")}\n`, "utf-8");
-      trimLogFile(logPath, MAX_LOG_SIZE_BYTES)
+export default defineConfig({
+  plugins: [react(), jsxLocPlugin(), tailwindcss()],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "client", "src"),
+      "@shared": path.resolve(__dirname, "shared"),
+      "@assets": path.resolve(__dirname, "attached_assets"),
+    },
+  },
+  envDir: __dirname,
+  root: path.resolve(__dirname, "client"),
+  build: {
+    outDir: path.resolve(__dirname, "dist", "public"),
+    emptyOutDir: true,
+  },
+  server: {
+    fs: {
+      strict: true,
+      deny: ["**/.*"],
+    },
+  },
 });
