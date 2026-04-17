@@ -1,180 +1,211 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
-import { Mail, Phone, Download } from "lucide-react";
+import { Download, KeyRound, LockKeyhole, Smartphone } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 
-const APP_DOWNLOAD_URL = import.meta.env.VITE_ANDROID_APP_URL?.trim() || "";
+const APP_DOWNLOAD_URL =
+  import.meta.env.VITE_ANDROID_APP_URL?.trim() ||
+  "https://drive.google.com/file/d/127s1NQTtKHMDz_e2g0Yu7I3P6xAJNSSf/view?usp=drivesdk";
 
 export default function Home() {
   const [, setLocation] = useLocation();
-  const [loginMethod, setLoginMethod] = useState<"phone" | "email">("phone");
-  const [inputValue, setInputValue] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const { data: currentUser } = trpc.auth.me.useQuery();
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
+  const [verificationCode, setVerificationCode] = useState("");
+
+  const { data: currentUser, isLoading: isUserLoading } = trpc.auth.me.useQuery();
+  const loginMutation = trpc.auth.login.useMutation();
+  const sendOtpMutation = trpc.auth.sendOtp.useMutation();
   const isDownloadReady = useMemo(() => /^https?:\/\//.test(APP_DOWNLOAD_URL), []);
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    try {
-      if (currentUser) {
-        setLocation("/app");
-        return;
-      }
-
-      toast.info("الدخول من الويب بقى API-first، اعمل إنشاء حساب جديد الأول علشان يتسجل سيشن حقيقي");
-      setLocation("/signup");
-    } finally {
-      setIsLoading(false);
+  useEffect(() => {
+    if (currentUser) {
+      setLocation("/app");
     }
-  };
+  }, [currentUser, setLocation]);
 
-  const handleCreateAccount = () => {
-    setLocation("/signup");
-  };
+  const normalizedIdentifier = identifier.trim();
+  const looksLikeEmail = normalizedIdentifier.includes("@");
 
-  const handleDownloadClick = () => {
-    if (isDownloadReady) {
-      window.open(APP_DOWNLOAD_URL, "_blank", "noopener,noreferrer");
+  const handleSendOtp = async () => {
+    if (!normalizedIdentifier) {
+      toast.error("اكتب البريد أو رقم الجوال الأول");
       return;
     }
 
-    toast.info("رابط تنزيل التطبيق لسه ما اترفعش في الإعدادات، ضيف VITE_ANDROID_APP_URL علشان الزر يشتغل");
+    try {
+      await sendOtpMutation.mutateAsync({
+        contactMethod: looksLikeEmail ? "email" : "phone",
+        contact: normalizedIdentifier,
+      });
+      toast.success("تم إرسال رمز التحقق. دخّله لإكمال تسجيل الدخول على الويب");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر إرسال رمز التحقق");
+    }
+  };
+
+  const handleLogin = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+
+    if (!normalizedIdentifier || !password.trim()) {
+      toast.error("اكتب البريد أو رقم الجوال وكلمة المرور أولاً");
+      return;
+    }
+
+    if (!verificationCode.trim()) {
+      toast.error("أدخل رمز التحقق المرسل قبل تسجيل الدخول");
+      return;
+    }
+
+    try {
+      await loginMutation.mutateAsync({
+        identifier: normalizedIdentifier,
+        password,
+        verificationCode: verificationCode.trim(),
+      });
+      toast.success("تم تسجيل الدخول بنجاح");
+      setLocation("/app");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر تسجيل الدخول حالياً");
+    }
+  };
+
+  const handleDownloadClick = () => {
+    if (!isDownloadReady) {
+      toast.error("رابط التنزيل غير متاح حالياً");
+      return;
+    }
+
+    window.open(APP_DOWNLOAD_URL, "_blank", "noopener,noreferrer");
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-secondary/20 overflow-hidden">
-      {/* خلفية مزخرفة */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-20 right-20 w-72 h-72 bg-primary/10 rounded-full blur-3xl"></div>
-        <div className="absolute bottom-20 left-20 w-96 h-96 bg-accent/10 rounded-full blur-3xl"></div>
+    <div className="min-h-screen overflow-hidden bg-gradient-to-br from-background via-background to-secondary/20">
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute right-20 top-20 h-72 w-72 rounded-full bg-primary/10 blur-3xl"></div>
+        <div className="absolute bottom-20 left-20 h-96 w-96 rounded-full bg-accent/10 blur-3xl"></div>
       </div>
 
-      {/* المحتوى الرئيسي */}
-      <div className="relative z-10 min-h-screen flex flex-col items-center justify-center px-4 sm:px-6 lg:px-8">
+      <div className="relative z-10 flex min-h-screen items-center justify-center px-4 py-8 sm:px-6 lg:px-8">
         <div className="w-full max-w-md space-y-8">
-          {/* اسم التطبيق بتأثير عائم */}
-          <div className="text-center space-y-4">
+          <div className="space-y-4 text-center">
             <div className="floating-text">
-              <h1 className="text-5xl sm:text-6xl font-bold gradient-text">
-                يامن شات
-              </h1>
+              <h1 className="text-5xl font-bold gradient-text sm:text-6xl">يامن شات</h1>
             </div>
-            <p className="text-lg text-muted-foreground">
-              تطبيق التواصل العائلي الآمن والموثوق
-            </p>
+            <p className="text-lg text-muted-foreground">تطبيق التواصل العائلي الآمن والموثوق</p>
             <div className="mt-6 flex justify-center">
-              <img 
-                src="/home-child-security-realistic.png" 
-                alt="Yamen Chat Security" 
-                className="w-64 h-64 object-cover rounded-3xl shadow-2xl border-4 border-primary/30 glow-effect"
+              <img
+                src="/home-child-security-realistic.png"
+                alt="Yamen Chat Security"
+                className="glow-effect h-64 w-64 rounded-3xl border-4 border-primary/30 object-cover shadow-2xl"
               />
             </div>
           </div>
 
-          {/* بطاقة نموذج التسجيل */}
-          <Card className="p-8 shadow-lg border-0 smooth-transition hover:shadow-xl">
-            <form onSubmit={handleLogin} className="space-y-6">
-              {/* اختيار طريقة التسجيل */}
-              <div className="flex gap-3 mb-6">
-                <button
-                  type="button"
-                  onClick={() => setLoginMethod("phone")}
-                  className={`flex-1 py-2 px-4 rounded-lg font-medium transition-all ${
-                    loginMethod === "phone"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
-                  }`}
-                >
-                  <Phone className="w-4 h-4 inline-block ml-2" />
-                  الجوال
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLoginMethod("email")}
-                  className={`flex-1 py-2 px-4 rounded-lg font-medium transition-all ${
-                    loginMethod === "email"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
-                  }`}
-                >
-                  <Mail className="w-4 h-4 inline-block ml-2" />
-                  البريد
-                </button>
-              </div>
-
-              {/* حقل الإدخال */}
+          <Card className="border-0 p-8 shadow-lg transition-all hover:shadow-xl">
+            <form onSubmit={handleLogin} className="space-y-5">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">
-                  {loginMethod === "phone" ? "رقم الجوال" : "البريد الإلكتروني"}
-                </label>
+                <label className="text-sm font-medium text-foreground">البريد الإلكتروني أو رقم الجوال</label>
                 <Input
-                  type={loginMethod === "phone" ? "tel" : "email"}
-                  placeholder={
-                    loginMethod === "phone"
-                      ? "أدخل رقم جوالك"
-                      : "أدخل بريدك الإلكتروني"
-                  }
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  className="h-12 text-base smooth-transition focus:ring-2 focus:ring-primary"
+                  type="text"
+                  inputMode="email"
+                  autoComplete="username"
+                  placeholder="example@email.com أو 01000000000"
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
+                  className="h-12 text-base"
                   required
                 />
               </div>
 
-              {/* زر تسجيل الدخول */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">كلمة المرور</label>
+                <div className="relative">
+                  <LockKeyhole className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    type="password"
+                    autoComplete="current-password"
+                    placeholder="أدخل كلمة المرور"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="h-12 pr-10 text-base"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-3 rounded-xl bg-secondary/30 p-4">
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <Button
+                    type="button"
+                    onClick={handleSendOtp}
+                    disabled={sendOtpMutation.isPending || !normalizedIdentifier}
+                    variant="outline"
+                    className="h-11 sm:w-44"
+                  >
+                    <KeyRound className="h-4 w-4" />
+                    {sendOtpMutation.isPending ? "جارٍ الإرسال..." : "إرسال الرمز"}
+                  </Button>
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="أدخل رمز التحقق"
+                    value={verificationCode}
+                    onChange={(e) => setVerificationCode(e.target.value)}
+                    className="h-11 text-base"
+                    required
+                  />
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  تم تفعيل تسجيل الدخول على الويب بكلمة المرور + رمز التحقق لنفس الحساب.
+                </p>
+              </div>
+
               <Button
                 type="submit"
-                disabled={isLoading || !inputValue}
-                className="w-full h-12 text-base font-semibold smooth-transition hover:shadow-lg"
+                disabled={loginMutation.isPending || isUserLoading}
+                className="h-12 w-full text-base font-semibold"
               >
-                {isLoading ? "جارٍ التحقق..." : currentUser ? "الدخول إلى حسابك" : "إنشاء/تفعيل حساب"}
+                {loginMutation.isPending ? "جارٍ تسجيل الدخول..." : "تسجيل الدخول"}
               </Button>
             </form>
 
-            {/* فاصل */}
-            <div className="relative my-6">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-border"></div>
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-card text-muted-foreground">أو</span>
-              </div>
-            </div>
+            <div className="my-6 h-px bg-border" />
 
-            {/* زر إنشاء حساب جديد */}
-            <Button
-              type="button"
-              onClick={handleCreateAccount}
-              variant="outline"
-              className="w-full h-12 text-base font-semibold smooth-transition hover:bg-secondary"
-            >
-              إنشاء حساب جديد
-            </Button>
-          </Card>
+            <div className="space-y-3 text-center">
+              <button
+                type="button"
+                onClick={() => setLocation("/signup")}
+                className="text-sm font-semibold text-primary underline-offset-4 hover:underline"
+              >
+                إنشاء حساب جديد
+              </button>
 
-          {/* زر تنزيل التطبيق */}
-          <div className="space-y-3 pt-4">
-            <div className="flex justify-center">
               <Button
                 type="button"
                 onClick={handleDownloadClick}
-                className="inline-flex h-auto items-center gap-2 px-6 py-3 bg-accent text-accent-foreground rounded-lg font-semibold smooth-transition hover:shadow-lg hover:scale-105"
+                variant="outline"
+                className="h-12 w-full text-base font-semibold"
               >
-                <Download className="w-5 h-5" />
-                {isDownloadReady ? "تنزيل التطبيق" : "رابط التطبيق غير مضاف بعد"}
+                <Download className="h-4 w-4" />
+                Download App
               </Button>
+
+              <div className="rounded-xl bg-secondary/40 px-4 py-3 text-right text-sm text-muted-foreground">
+                <div className="mb-1 flex items-center gap-2 font-semibold text-foreground">
+                  <Smartphone className="h-4 w-4 text-primary" />
+                  رابط التطبيق مضاف على الويب والموبايل
+                </div>
+                <p>
+                  لو كنت مسجل برقم جوال، اكتب رقمك ثم كلمة المرور، وبعدها أرسل رمز التحقق وأدخله من نفس الشاشة.
+                </p>
+              </div>
             </div>
-            {!isDownloadReady && (
-              <p className="text-center text-sm text-muted-foreground">
-                ضيف رابط APK أو صفحة التنزيل داخل المتغير <span className="font-semibold">VITE_ANDROID_APP_URL</span> علشان الزر يشتغل مباشرة.
-              </p>
-            )}
-          </div>
+          </Card>
         </div>
       </div>
     </div>

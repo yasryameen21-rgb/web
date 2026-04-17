@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ChangeEvent, type FormEvent } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,20 +7,25 @@ import { ArrowRight, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 
+const DEFAULT_BIRTH_DATE = "2008-04-03";
+const MIN_BIRTH_DATE = "1950-01-01";
+
 export default function SignUp() {
   const [, setLocation] = useLocation();
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
-    dateOfBirth: "",
+    dateOfBirth: DEFAULT_BIRTH_DATE,
     contactMethod: "phone" as "phone" | "email",
     contact: "",
+    password: "",
+    verificationCode: "",
   });
-  const [isLoading, setIsLoading] = useState(false);
 
   const createUserMutation = trpc.users.create.useMutation();
+  const sendOtpMutation = trpc.auth.sendOtp.useMutation();
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInputChange = (e: ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({
       ...prev,
@@ -33,148 +38,159 @@ export default function SignUp() {
       ...prev,
       contactMethod: method,
       contact: "",
+      verificationCode: "",
     }));
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    // التحقق من البيانات
-    if (!formData.firstName.trim()) {
-      toast.error("يرجى إدخال الاسم الأول");
-      return;
-    }
-    if (!formData.lastName.trim()) {
-      toast.error("يرجى إدخال اسم العائلة");
-      return;
-    }
-    if (!formData.dateOfBirth) {
-      toast.error("يرجى إدخال تاريخ الميلاد");
-      return;
-    }
+  const validateContact = () => {
     if (!formData.contact.trim()) {
       toast.error(
         `يرجى إدخال ${formData.contactMethod === "phone" ? "رقم الجوال" : "البريد الإلكتروني"}`
       );
-      return;
+      return false;
     }
 
-    // التحقق من صيغة البريد الإلكتروني إذا كانت الطريقة بريد
     if (
       formData.contactMethod === "email" &&
-      !formData.contact.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.contact.trim())
     ) {
       toast.error("يرجى إدخال بريد إلكتروني صحيح");
-      return;
+      return false;
     }
 
-    setIsLoading(true);
-    try {
-      await createUserMutation.mutateAsync({
-        firstName: formData.firstName,
-        lastName: formData.lastName,
-        dateOfBirth: new Date(formData.dateOfBirth),
-        contactMethod: formData.contactMethod,
-        contact: formData.contact,
-      });
+    return true;
+  };
 
-      toast.success("تم إنشاء الحساب بنجاح!");
-      setLocation("/welcome");
+  const handleSendOtp = async () => {
+    if (!validateContact()) return;
+
+    try {
+      await sendOtpMutation.mutateAsync({
+        contactMethod: formData.contactMethod,
+        contact: formData.contact.trim(),
+      });
+      toast.success("تم إرسال رمز التحقق، أدخله لإكمال إنشاء الحساب");
     } catch (error) {
-      toast.error("حدث خطأ أثناء إنشاء الحساب");
-      console.error(error);
-    } finally {
-      setIsLoading(false);
+      toast.error(error instanceof Error ? error.message : "تعذر إرسال رمز التحقق");
     }
   };
 
-  const handleBack = () => {
-    setLocation("/");
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+
+    if (!formData.firstName.trim()) {
+      toast.error("يرجى إدخال الاسم الأول");
+      return;
+    }
+
+    if (!formData.lastName.trim()) {
+      toast.error("يرجى إدخال اسم العائلة");
+      return;
+    }
+
+    if (!validateContact()) {
+      return;
+    }
+
+    if (!formData.password || formData.password.length < 8) {
+      toast.error("كلمة المرور لازم تكون 8 أحرف على الأقل");
+      return;
+    }
+
+    if (!formData.verificationCode.trim()) {
+      toast.error("أدخل رمز التحقق أولاً");
+      return;
+    }
+
+    try {
+      await createUserMutation.mutateAsync({
+        firstName: formData.firstName.trim(),
+        lastName: formData.lastName.trim(),
+        dateOfBirth: new Date(formData.dateOfBirth),
+        contactMethod: formData.contactMethod,
+        contact: formData.contact.trim(),
+        password: formData.password,
+        verificationCode: formData.verificationCode.trim(),
+      });
+
+      toast.success("تم إنشاء الحساب وتفعيل الجلسة بنجاح");
+      setLocation("/welcome");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "حدث خطأ أثناء إنشاء الحساب");
+    }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-secondary/20 overflow-hidden">
-      {/* خلفية مزخرفة */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-20 right-20 w-72 h-72 bg-primary/10 rounded-full blur-3xl"></div>
-        <div className="absolute bottom-20 left-20 w-96 h-96 bg-accent/10 rounded-full blur-3xl"></div>
+    <div className="min-h-screen overflow-hidden bg-gradient-to-br from-background via-background to-secondary/20">
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute right-20 top-20 h-72 w-72 rounded-full bg-primary/10 blur-3xl"></div>
+        <div className="absolute bottom-20 left-20 h-96 w-96 rounded-full bg-accent/10 blur-3xl"></div>
       </div>
 
-      {/* المحتوى الرئيسي */}
-      <div className="relative z-10 min-h-screen flex flex-col items-center justify-center px-4 sm:px-6 lg:px-8 py-8">
+      <div className="relative z-10 flex min-h-screen items-center justify-center px-4 py-8 sm:px-6 lg:px-8">
         <div className="w-full max-w-md space-y-6">
-          {/* رأس الصفحة */}
           <div className="flex items-center justify-between">
             <h1 className="text-3xl font-bold gradient-text">إنشاء حساب جديد</h1>
             <button
-              onClick={handleBack}
-              className="p-2 hover:bg-secondary rounded-lg smooth-transition"
+              onClick={() => setLocation("/")}
+              className="rounded-lg p-2 transition hover:bg-secondary"
               title="العودة"
             >
-              <ArrowRight className="w-6 h-6 text-muted-foreground" />
+              <ArrowRight className="h-6 w-6 text-muted-foreground" />
             </button>
           </div>
 
-          {/* بطاقة النموذج */}
-          <Card className="p-8 shadow-lg border-0 smooth-transition hover:shadow-xl">
+          <Card className="border-0 p-8 shadow-lg transition-all hover:shadow-xl">
             <form onSubmit={handleSubmit} className="space-y-5">
-              {/* الاسم الأول */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">
-                  الاسم الأول *
-                </label>
-                <Input
-                  type="text"
-                  name="firstName"
-                  placeholder="أدخل اسمك الأول"
-                  value={formData.firstName}
-                  onChange={handleInputChange}
-                  className="h-11 text-base smooth-transition focus:ring-2 focus:ring-primary"
-                  required
-                />
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">الاسم الأول *</label>
+                  <Input
+                    type="text"
+                    name="firstName"
+                    placeholder="أدخل اسمك الأول"
+                    value={formData.firstName}
+                    onChange={handleInputChange}
+                    className="h-11 text-base"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">اسم العائلة *</label>
+                  <Input
+                    type="text"
+                    name="lastName"
+                    placeholder="أدخل اسم العائلة"
+                    value={formData.lastName}
+                    onChange={handleInputChange}
+                    className="h-11 text-base"
+                    required
+                  />
+                </div>
               </div>
 
-              {/* اسم العائلة */}
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">
-                  اسم العائلة *
-                </label>
-                <Input
-                  type="text"
-                  name="lastName"
-                  placeholder="أدخل اسم عائلتك"
-                  value={formData.lastName}
-                  onChange={handleInputChange}
-                  className="h-11 text-base smooth-transition focus:ring-2 focus:ring-primary"
-                  required
-                />
-              </div>
-
-              {/* تاريخ الميلاد */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">
-                  تاريخ الميلاد *
-                </label>
+                <label className="text-sm font-medium text-foreground">تاريخ الميلاد *</label>
                 <Input
                   type="date"
                   name="dateOfBirth"
                   value={formData.dateOfBirth}
+                  min={MIN_BIRTH_DATE}
+                  max={DEFAULT_BIRTH_DATE}
                   onChange={handleInputChange}
-                  className="h-11 text-base smooth-transition focus:ring-2 focus:ring-primary"
+                  className="h-11 text-base"
                   required
                 />
               </div>
 
-              {/* اختيار طريقة التواصل */}
               <div className="space-y-3">
-                <label className="text-sm font-medium text-foreground">
-                  طريقة التواصل *
-                </label>
+                <label className="text-sm font-medium text-foreground">طريقة التواصل *</label>
                 <div className="flex gap-3">
                   <button
                     type="button"
                     onClick={() => handleContactMethodChange("phone")}
-                    className={`flex-1 py-2 px-4 rounded-lg font-medium transition-all ${
+                    className={`flex-1 rounded-lg px-4 py-2 font-medium transition-all ${
                       formData.contactMethod === "phone"
                         ? "bg-primary text-primary-foreground"
                         : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
@@ -185,7 +201,7 @@ export default function SignUp() {
                   <button
                     type="button"
                     onClick={() => handleContactMethodChange("email")}
-                    className={`flex-1 py-2 px-4 rounded-lg font-medium transition-all ${
+                    className={`flex-1 rounded-lg px-4 py-2 font-medium transition-all ${
                       formData.contactMethod === "email"
                         ? "bg-primary text-primary-foreground"
                         : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
@@ -196,37 +212,72 @@ export default function SignUp() {
                 </div>
               </div>
 
-              {/* حقل التواصل */}
               <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">
-                  {formData.contactMethod === "phone"
-                    ? "رقم الجوال *"
-                    : "البريد الإلكتروني *"}
+                  {formData.contactMethod === "phone" ? "رقم الجوال *" : "البريد الإلكتروني *"}
                 </label>
                 <Input
                   type={formData.contactMethod === "phone" ? "tel" : "email"}
                   name="contact"
                   placeholder={
-                    formData.contactMethod === "phone"
-                      ? "أدخل رقم جوالك"
-                      : "أدخل بريدك الإلكتروني"
+                    formData.contactMethod === "phone" ? "أدخل رقم الجوال" : "أدخل بريدك الإلكتروني"
                   }
                   value={formData.contact}
                   onChange={handleInputChange}
-                  className="h-11 text-base smooth-transition focus:ring-2 focus:ring-primary"
+                  className="h-11 text-base"
                   required
                 />
               </div>
 
-              {/* زر الإنشاء */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">إنشاء كلمة المرور *</label>
+                <Input
+                  type="password"
+                  name="password"
+                  placeholder="8 أحرف أو أكثر"
+                  autoComplete="new-password"
+                  value={formData.password}
+                  onChange={handleInputChange}
+                  className="h-11 text-base"
+                  required
+                />
+              </div>
+
+              <div className="space-y-3 rounded-xl bg-secondary/30 p-4">
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <Button
+                    type="button"
+                    onClick={handleSendOtp}
+                    disabled={sendOtpMutation.isPending}
+                    variant="outline"
+                    className="h-11 sm:w-44"
+                  >
+                    {sendOtpMutation.isPending ? "جارٍ الإرسال..." : "إرسال رمز التحقق"}
+                  </Button>
+                  <Input
+                    type="text"
+                    name="verificationCode"
+                    inputMode="numeric"
+                    placeholder="أدخل رمز التحقق"
+                    value={formData.verificationCode}
+                    onChange={handleInputChange}
+                    className="h-11 text-base"
+                    required
+                  />
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  لازم ترسل الرمز وتدخله قبل إنشاء الحساب، والويب لن يقبل التسجيل بدونه.
+                </p>
+              </div>
+
               <Button
                 type="submit"
-                disabled={isLoading}
-                className="w-full h-12 text-base font-semibold smooth-transition hover:shadow-lg mt-6"
+                disabled={createUserMutation.isPending}
+                className="mt-6 h-12 w-full text-base font-semibold"
               >
-                {isLoading ? (
+                {createUserMutation.isPending ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin ml-2" />
+                    <Loader2 className="ml-2 h-4 w-4 animate-spin" />
                     جاري الإنشاء...
                   </>
                 ) : (
@@ -236,9 +287,8 @@ export default function SignUp() {
             </form>
           </Card>
 
-          {/* ملاحظة */}
           <p className="text-center text-sm text-muted-foreground">
-            بإنشاء حساب، فإنك توافق على شروط الخدمة
+            بإنشاء حساب، فأنت توافق على شروط الخدمة وسياسة الخصوصية.
           </p>
         </div>
       </div>
