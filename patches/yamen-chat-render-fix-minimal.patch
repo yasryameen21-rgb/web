@@ -1,0 +1,45 @@
+diff --git a/package.json b/package.json
+index 97a8635..21dac45 100644
+--- a/package.json
++++ b/package.json
+@@ -3,10 +3,14 @@
+   "version": "1.0.0",
+   "type": "module",
+   "license": "MIT",
++  "packageManager": "pnpm@10.33.0",
++  "engines": {
++    "node": ">=20.19.0 <21 || >=22.12.0 <23"
++  },
+   "scripts": {
+     "dev": "NODE_ENV=development tsx watch server/_core/index.ts",
+-    "build": "vite build && esbuild server/_core/index.ts --bundle --platform=node --format=esm --external:@babel/preset-typescript/package.json --external:@tailwindcss/oxide-linux-x64-musl --external:@tailwindcss/oxide-linux-x64-gnu --outdir=dist",
+-    "start": "NODE_ENV=production node dist/index.js",
++    "build": "vite build && esbuild server/_core/index.ts --bundle --platform=node --format=cjs --external:./vite --external:@babel/preset-typescript/package.json --external:@tailwindcss/oxide-linux-x64-musl --external:@tailwindcss/oxide-linux-x64-gnu --outfile=dist/index.cjs",
++    "start": "NODE_ENV=production node dist/index.cjs",
+     "check": "tsc --noEmit",
+     "format": "prettier --write .",
+     "test": "vitest run",
+diff --git a/server/_core/index.ts b/server/_core/index.ts
+index f472331..3c1a265 100644
+--- a/server/_core/index.ts
++++ b/server/_core/index.ts
+@@ -6,7 +6,7 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
+ import { registerOAuthRoutes } from "./oauth";
+ import { appRouter } from "../routers";
+ import { createContext } from "./context";
+-import { serveStatic, setupVite } from "./vite";
++import { serveStatic } from "./static";
+ 
+ function isPortAvailable(port: number): Promise<boolean> {
+   return new Promise(resolve => {
+@@ -43,8 +43,9 @@ async function startServer() {
+       createContext,
+     })
+   );
+-  // development mode uses Vite, production mode uses static files
++  // development mode loads Vite lazily so production bundling doesn't pull Vite's native CSS toolchain
+   if (process.env.NODE_ENV === "development") {
++    const { setupVite } = await import("./vite");
+     await setupVite(app, server);
+   } else {
+     serveStatic(app);
