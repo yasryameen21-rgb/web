@@ -68,6 +68,16 @@ export type BackendPost = {
   comments_count: number;
 };
 
+export type BackendComment = {
+  id: string;
+  post_id: string;
+  user_id: string;
+  content: string;
+  reactions?: Record<string, string[]>;
+  created_at: string;
+  updated_at: string;
+};
+
 export type BackendMarketplaceItem = {
   id: string;
   seller_id: string;
@@ -193,6 +203,10 @@ function getApiBaseUrl() {
   return baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
 }
 
+function wait(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 function parseCookies(req: Request) {
   return cookie.parse(req.headers.cookie ?? "");
 }
@@ -288,25 +302,56 @@ export async function apiRequest<T>(
     headers.set("authorization", `Bearer ${init.accessToken}`);
   }
 
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    ...init,
-    headers,
-  });
+  const maxAttempts = 2;
+  let lastError: unknown = null;
 
-  const contentType = response.headers.get("content-type") ?? "";
-  const payload = contentType.includes("application/json")
-    ? await response.json().catch(() => null)
-    : await response.text().catch(() => "");
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
 
-  if (!response.ok) {
-    throw new BackendApiError(
-      extractErrorMessage(payload, `Backend API request failed with status ${response.status}`),
-      response.status,
-      payload
-    );
+    try {
+      const response = await fetch(`${getApiBaseUrl()}${path}`, {
+        ...init,
+        headers,
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeout);
+
+      const contentType = response.headers.get("content-type") ?? "";
+      const payload = contentType.includes("application/json")
+        ? await response.json().catch(() => null)
+        : await response.text().catch(() => "");
+
+      if (!response.ok) {
+        throw new BackendApiError(
+          extractErrorMessage(payload, `Backend API request failed with status ${response.status}`),
+          response.status,
+          payload
+        );
+      }
+
+      return payload as T;
+    } catch (error) {
+      clearTimeout(timeout);
+      lastError = error;
+
+      const isAbortError = error instanceof Error && error.name === "AbortError";
+      const isNetworkError = error instanceof TypeError || isAbortError;
+
+      if (!isNetworkError || attempt === maxAttempts) {
+        break;
+      }
+
+      await wait(800 * attempt);
+    }
   }
 
-  return payload as T;
+  if (lastError instanceof BackendApiError) {
+    throw lastError;
+  }
+
+  throw new Error("تعذر الاتصال بالخادم حالياً. جرّب مرة تانية بعد ثوانٍ.");
 }
 
 export async function fetchCurrentUser(accessToken: string) {

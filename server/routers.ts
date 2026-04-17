@@ -8,6 +8,7 @@ import {
   formatRelativeArabicDate,
   getApiSession,
   setApiSession,
+  type BackendComment,
   type BackendConversation,
   type BackendGroup,
   type BackendLiveStream,
@@ -34,7 +35,6 @@ const createUserInput = z.object({
 const loginInput = z.object({
   identifier: z.string().min(1, "البريد الإلكتروني أو رقم الجوال مطلوب"),
   password: z.string().min(1, "كلمة المرور مطلوبة"),
-  verificationCode: z.string().min(4, "رمز التحقق مطلوب"),
 });
 
 const sendOtpInput = z.object({
@@ -67,6 +67,10 @@ const reactToPostInput = z.object({
 const addCommentInput = z.object({
   postId: z.string(),
   content: z.string().min(1, "اكتب تعليقاً أولاً"),
+});
+
+const postCommentsInput = z.object({
+  postId: z.string(),
 });
 
 const conversationCreateInput = z.object({
@@ -141,11 +145,13 @@ function normalizeIdentifier(identifier: string) {
 function buildUserDirectory(users: BackendUser[], currentUserId?: string | null) {
   return users
     .filter(user => user.id !== currentUserId)
-    .slice(0, 12)
+    .slice(0, 30)
     .map(user => ({
       id: user.id,
       name: user.name,
       bio: user.bio || user.email || user.phone_number || "عضو جديد في يامن شات",
+      email: user.email,
+      phoneNumber: user.phone_number ?? null,
       following: false,
     }));
 }
@@ -250,6 +256,21 @@ function buildMessageCards(messages: BackendMessage[], users: BackendUser[], cur
     }));
 }
 
+function buildCommentCards(comments: BackendComment[], users: BackendUser[], currentUserId?: string | null) {
+  const userMap = new Map(users.map(user => [user.id, user.name]));
+  return [...comments]
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+    .map(comment => ({
+      id: comment.id,
+      postId: comment.post_id,
+      authorId: comment.user_id,
+      author: userMap.get(comment.user_id) ?? "مستخدم",
+      text: comment.content,
+      mine: comment.user_id === currentUserId,
+      time: formatRelativeArabicDate(comment.created_at),
+    }));
+}
+
 function buildStoryCards(stories: BackendStory[], users: BackendUser[]) {
   const userMap = new Map(users.map(user => [user.id, user.name]));
   return stories.map(story => ({
@@ -301,7 +322,7 @@ export const appRouter = router({
     login: publicProcedure.input(loginInput).mutation(async ({ input, ctx }) => {
       const normalized = normalizeIdentifier(input.identifier);
 
-      await apiRequest<{
+      const tokenResponse = await apiRequest<{
         access_token: string;
         refresh_token: string;
         token_type: string;
@@ -312,21 +333,6 @@ export const appRouter = router({
           email: normalized.loginEmail,
           password: input.password,
         }),
-      });
-
-      const otpLoginPath = normalized.contactMethod === "email" ? "/api/auth/login-email" : "/api/auth/login-phone";
-      const otpPayload = normalized.contactMethod === "email"
-        ? { email: normalized.contact, otp_code: input.verificationCode }
-        : { phone_number: normalized.contact, otp_code: input.verificationCode };
-
-      const tokenResponse = await apiRequest<{
-        access_token: string;
-        refresh_token: string;
-        token_type: string;
-        expires_in: number;
-      }>(otpLoginPath, {
-        method: "POST",
-        body: JSON.stringify(otpPayload),
       });
 
       const currentUser = await fetchCurrentUser(tokenResponse.access_token);
@@ -537,6 +543,15 @@ export const appRouter = router({
       });
 
       return { success: true };
+    }),
+    comments: publicProcedure.input(postCommentsInput).mutation(async ({ input, ctx }) => {
+      const session = getApiSession(ctx.req);
+      const [comments, users] = await Promise.all([
+        apiRequest<BackendComment[]>(`/api/posts/${input.postId}/comments`, { method: "GET" }),
+        apiRequest<BackendUser[]>("/api/users?limit=50", { method: "GET" }),
+      ]);
+
+      return buildCommentCards(comments, users, session.profile?.user_id);
     }),
   }),
 
