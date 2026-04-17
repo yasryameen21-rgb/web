@@ -83,23 +83,23 @@
   --primary-foreground: oklch(0.98 0 0);
   --sidebar-primary: oklch(0.6 0.22 280);
   --sidebar-primary-foreground: oklch(0.98 0 0);
-  --background: oklch(0.15 0.01 280);
-  --foreground: oklch(0.9 0.01 280);
-  --card: oklch(0.22 0.01 280);
-  --card-foreground: oklch(0.9 0.01 280);
-  --popover: oklch(0.22 0.01 280);
-  --popover-foreground: oklch(0.9 0.01 280);
-  --secondary: oklch(0.3 0.02 280);
-  --secondary-foreground: oklch(0.8 0.01 280);
-  --muted: oklch(0.35 0.02 280);
-  --muted-foreground: oklch(0.7 0.02 280);
+  --background: oklch(0.12 0 0);
+  --foreground: oklch(0.98 0 0);
+  --card: oklch(0.16 0 0);
+  --card-foreground: oklch(0.98 0 0);
+  --popover: oklch(0.16 0 0);
+  --popover-foreground: oklch(0.98 0 0);
+  --secondary: oklch(0.24 0.01 280);
+  --secondary-foreground: oklch(0.96 0 0);
+  --muted: oklch(0.2 0.01 280);
+  --muted-foreground: oklch(0.8 0 0);
   --accent: oklch(0.7 0.25 30);
   --accent-foreground: oklch(0.15 0.01 280);
   --destructive: oklch(0.65 0.2 25);
   --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(0.3 0.02 280);
-  --input: oklch(0.25 0.01 280);
-  --ring: oklch(0.6 0.22 280);
+  --border: oklch(0.3 0 0);
+  --input: oklch(0.18 0 0);
+  --ring: oklch(0.62 0.22 280);
   --chart-1: oklch(0.6 0.2 280);
   --chart-2: oklch(0.55 0.2 280);
   --chart-3: oklch(0.5 0.18 280);
@@ -124,6 +124,8 @@
   body {
     @apply bg-background text-foreground;
     font-family: 'Cairo', 'Poppins', sans-serif;
+    background-color: #050505;
+    color: #ffffff;
   }
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]),

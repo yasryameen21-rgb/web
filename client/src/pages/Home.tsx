@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
-import { Download, KeyRound, LockKeyhole, Smartphone } from "lucide-react";
+import { Download, LockKeyhole, Smartphone } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 
@@ -15,11 +15,9 @@ export default function Home() {
   const [, setLocation] = useLocation();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
-  const [verificationCode, setVerificationCode] = useState("");
 
   const { data: currentUser, isLoading: isUserLoading } = trpc.auth.me.useQuery();
   const loginMutation = trpc.auth.login.useMutation();
-  const sendOtpMutation = trpc.auth.sendOtp.useMutation();
   const isDownloadReady = useMemo(() => /^https?:\/\//.test(APP_DOWNLOAD_URL), []);
 
   useEffect(() => {
@@ -29,24 +27,6 @@ export default function Home() {
   }, [currentUser, setLocation]);
 
   const normalizedIdentifier = identifier.trim();
-  const looksLikeEmail = normalizedIdentifier.includes("@");
-
-  const handleSendOtp = async () => {
-    if (!normalizedIdentifier) {
-      toast.error("اكتب البريد أو رقم الجوال الأول");
-      return;
-    }
-
-    try {
-      await sendOtpMutation.mutateAsync({
-        contactMethod: looksLikeEmail ? "email" : "phone",
-        contact: normalizedIdentifier,
-      });
-      toast.success("تم إرسال رمز التحقق. دخّله لإكمال تسجيل الدخول على الويب");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "تعذر إرسال رمز التحقق");
-    }
-  };
 
   const handleLogin = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -56,16 +36,10 @@ export default function Home() {
       return;
     }
 
-    if (!verificationCode.trim()) {
-      toast.error("أدخل رمز التحقق المرسل قبل تسجيل الدخول");
-      return;
-    }
-
     try {
       await loginMutation.mutateAsync({
         identifier: normalizedIdentifier,
         password,
-        verificationCode: verificationCode.trim(),
       });
       toast.success("تم تسجيل الدخول بنجاح");
       setLocation("/app");
@@ -138,31 +112,8 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="space-y-3 rounded-xl bg-secondary/30 p-4">
-                <div className="flex flex-col gap-3 sm:flex-row">
-                  <Button
-                    type="button"
-                    onClick={handleSendOtp}
-                    disabled={sendOtpMutation.isPending || !normalizedIdentifier}
-                    variant="outline"
-                    className="h-11 sm:w-44"
-                  >
-                    <KeyRound className="h-4 w-4" />
-                    {sendOtpMutation.isPending ? "جارٍ الإرسال..." : "إرسال الرمز"}
-                  </Button>
-                  <Input
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="أدخل رمز التحقق"
-                    value={verificationCode}
-                    onChange={(e) => setVerificationCode(e.target.value)}
-                    className="h-11 text-base"
-                    required
-                  />
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  تم تفعيل تسجيل الدخول على الويب بكلمة المرور + رمز التحقق لنفس الحساب.
-                </p>
+              <div className="rounded-xl bg-secondary/30 px-4 py-3 text-right text-sm text-muted-foreground">
+                تسجيل الدخول يتم الآن بالبريد أو رقم الجوال مع كلمة المرور فقط، أما رمز التحقق فهو مطلوب عند إنشاء الحساب الجديد فقط.
               </div>
 
               <Button
@@ -201,7 +152,7 @@ export default function Home() {
                   رابط التطبيق مضاف على الويب والموبايل
                 </div>
                 <p>
-                  لو كنت مسجل برقم جوال، اكتب رقمك ثم كلمة المرور، وبعدها أرسل رمز التحقق وأدخله من نفس الشاشة.
+                  لو كنت مسجل برقم جوال، اكتب رقمك ثم كلمة المرور مباشرة. رمز التحقق أصبح خاصاً بصفحة إنشاء الحساب فقط.
                 </p>
               </div>
             </div>

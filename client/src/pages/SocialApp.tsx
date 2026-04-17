@@ -8,10 +8,13 @@ import {
   Loader2,
   LogOut,
   MessageCircle,
+  Phone,
   PlayCircle,
+  Search,
   Send,
   Settings,
   ShoppingBag,
+  UserCircle2,
   UserPlus,
   Users,
   Video,
@@ -25,17 +28,26 @@ import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 
-type AppTab = "feed" | "chat" | "stories" | "live" | "notifications" | "market" | "settings";
+type AppTab = "feed" | "chat" | "stories" | "live" | "notifications" | "market" | "profile" | "settings";
 
 const navItems: { key: AppTab; label: string; icon: typeof Home }[] = [
-  { key: "feed", label: "المنشورات", icon: Home },
+  { key: "feed", label: "الرئيسية", icon: Home },
   { key: "chat", label: "الدردشة", icon: MessageCircle },
   { key: "stories", label: "الستوري", icon: PlayCircle },
   { key: "live", label: "البث", icon: Video },
   { key: "notifications", label: "الإشعارات", icon: Bell },
   { key: "market", label: "السوق", icon: ShoppingBag },
-  { key: "settings", label: "المجموعات والحساب", icon: Settings },
+  { key: "profile", label: "صفحتي", icon: UserCircle2 },
+  { key: "settings", label: "الإعدادات", icon: Settings },
 ];
+
+const panelClass = "border border-border/80 bg-card/95 shadow-lg backdrop-blur";
+
+const normalizeLookup = (value?: string | null) =>
+  (value ?? "")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[-()+]/g, "");
 
 export default function SocialApp() {
   const [, setLocation] = useLocation();
@@ -43,11 +55,17 @@ export default function SocialApp() {
   const [activeTab, setActiveTab] = useState<AppTab>("feed");
   const [postText, setPostText] = useState("");
   const [commentText, setCommentText] = useState<Record<string, string>>({});
+  const [commentsOpen, setCommentsOpen] = useState<Record<string, boolean>>({});
+  const [commentsByPost, setCommentsByPost] = useState<Record<string, any[]>>({});
+  const [commentsLoading, setCommentsLoading] = useState<Record<string, boolean>>({});
   const [marketForm, setMarketForm] = useState({ name: "", price: "", city: "", category: "other" });
   const [storyForm, setStoryForm] = useState({ mediaUrl: "", mediaType: "image" as "image" | "video" });
   const [liveTitle, setLiveTitle] = useState("");
   const [chatMessage, setChatMessage] = useState("");
+  const [chatSearch, setChatSearch] = useState("");
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [importingContacts, setImportingContacts] = useState(false);
+  const [importedContactIds, setImportedContactIds] = useState<string[]>([]);
 
   const { data: currentUser, isLoading: isUserLoading } = trpc.auth.me.useQuery();
   const logoutMutation = trpc.auth.logout.useMutation();
@@ -69,6 +87,7 @@ export default function SocialApp() {
   const createPostMutation = trpc.feed.create.useMutation();
   const reactMutation = trpc.feed.react.useMutation();
   const commentMutation = trpc.feed.comment.useMutation();
+  const fetchCommentsMutation = trpc.feed.comments.useMutation();
   const addFriendMutation = trpc.users.addFriend.useMutation();
   const removeFriendMutation = trpc.users.removeFriend.useMutation();
   const createConversationMutation = trpc.chat.createConversation.useMutation();
@@ -95,10 +114,36 @@ export default function SocialApp() {
   }, [conversationsQuery.data, selectedConversationId]);
 
   const friendIds = useMemo(() => new Set((friendsQuery.data ?? []).map(friend => friend.id)), [friendsQuery.data]);
+  const importedContactIdSet = useMemo(() => new Set(importedContactIds), [importedContactIds]);
+
   const suggestions = useMemo(
     () => (directoryQuery.data ?? []).filter(user => !friendIds.has(user.id)).slice(0, 8),
     [directoryQuery.data, friendIds]
   );
+
+  const searchablePeople = useMemo(() => {
+    const people = directoryQuery.data ?? [];
+    const searchTerm = normalizeLookup(chatSearch);
+    return people.filter(person => {
+      if (!searchTerm) return true;
+      return [person.name, person.bio, person.email, person.phoneNumber]
+        .some(value => normalizeLookup(value).includes(searchTerm));
+    });
+  }, [directoryQuery.data, chatSearch]);
+
+  const myPosts = useMemo(
+    () => (feedQuery.data ?? []).filter(post => post.authorId === currentUser?.id),
+    [feedQuery.data, currentUser?.id]
+  );
+
+  const profileStats = useMemo(() => {
+    const posts = myPosts.length;
+    const likes = myPosts.reduce((sum, post) => sum + post.likes, 0);
+    const comments = myPosts.reduce((sum, post) => sum + post.comments, 0);
+    const shares = myPosts.reduce((sum, post) => sum + post.shares, 0);
+    const estimatedViews = likes + comments * 2 + shares * 3 + posts * 5;
+    return { posts, likes, comments, shares, estimatedViews };
+  }, [myPosts]);
 
   const unreadNotifications = (notificationsQuery.data ?? []).filter(item => !item.isRead).length;
   const isBusy =
@@ -115,11 +160,32 @@ export default function SocialApp() {
       utils.chat.conversations.invalidate(),
       utils.chat.messages.invalidate(),
       utils.users.friendsList.invalidate(),
+      utils.users.directory.invalidate(),
       utils.groups.list.invalidate(),
       utils.market.list.invalidate(),
       utils.stories.list.invalidate(),
       utils.live.list.invalidate(),
     ]);
+  };
+
+  const loadCommentsForPost = async (postId: string) => {
+    try {
+      setCommentsLoading(current => ({ ...current, [postId]: true }));
+      const comments = await fetchCommentsMutation.mutateAsync({ postId });
+      setCommentsByPost(current => ({ ...current, [postId]: comments }));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر تحميل التعليقات");
+    } finally {
+      setCommentsLoading(current => ({ ...current, [postId]: false }));
+    }
+  };
+
+  const handleToggleComments = async (postId: string) => {
+    const shouldOpen = !commentsOpen[postId];
+    setCommentsOpen(current => ({ ...current, [postId]: shouldOpen }));
+    if (shouldOpen) {
+      await loadCommentsForPost(postId);
+    }
   };
 
   const handleLogout = async () => {
@@ -136,8 +202,9 @@ export default function SocialApp() {
     try {
       await createPostMutation.mutateAsync({ content: postText, postType: "text" });
       setPostText("");
-      toast.success("تم نشر المنشور من الـ API");
+      toast.success("تم نشر المنشور بنجاح");
       await utils.feed.list.invalidate();
+      setActiveTab("feed");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "تعذر نشر المنشور");
     }
@@ -159,8 +226,9 @@ export default function SocialApp() {
     try {
       await commentMutation.mutateAsync({ postId, content });
       setCommentText(current => ({ ...current, [postId]: "" }));
+      await Promise.all([utils.feed.list.invalidate(), loadCommentsForPost(postId)]);
+      setCommentsOpen(current => ({ ...current, [postId]: true }));
       toast.success("تم إضافة التعليق");
-      await utils.feed.list.invalidate();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "تعذر إضافة التعليق");
     }
@@ -187,12 +255,60 @@ export default function SocialApp() {
         participantIds: [participantId],
         name,
       });
-      toast.success("تم إنشاء المحادثة");
+      toast.success("تم فتح المحادثة");
       await utils.chat.conversations.invalidate();
       setSelectedConversationId(conversation.id);
       setActiveTab("chat");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "تعذر إنشاء المحادثة");
+    }
+  };
+
+  const handleImportContacts = async () => {
+    const contactsApi = (navigator as any)?.contacts;
+    if (!contactsApi?.select) {
+      toast.info("استيراد دليل الجوال غير مدعوم في المتصفح الحالي، استخدم البحث باسم الشخص أو رقمه.");
+      return;
+    }
+
+    try {
+      setImportingContacts(true);
+      const pickedContacts = await contactsApi.select(["name", "tel", "email"], { multiple: true });
+      const directory = directoryQuery.data ?? [];
+      const matchedIds = directory
+        .filter(person => {
+          const personTokens = [person.name, person.phoneNumber, person.email, person.bio]
+            .map(normalizeLookup)
+            .filter(Boolean);
+
+          return pickedContacts.some((contact: any) => {
+            const contactTokens = [
+              ...(contact?.name ?? []),
+              ...(contact?.tel ?? []),
+              ...(contact?.email ?? []),
+            ]
+              .map(normalizeLookup)
+              .filter(Boolean);
+
+            return contactTokens.some((contactToken: string) =>
+              personTokens.some(personToken =>
+                personToken.includes(contactToken) || contactToken.includes(personToken)
+              )
+            );
+          });
+        })
+        .map(person => person.id);
+
+      setImportedContactIds(matchedIds);
+      if (matchedIds.length) {
+        toast.success(`تم العثور على ${matchedIds.length} مستخدم/مستخدمين من دليل الجوال داخل يامن شات`);
+      } else {
+        toast.info("تم فحص دليل الجوال، لكن لم يتم العثور على تطابقات حالياً.");
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر قراءة دليل الجوال");
+    } finally {
+      setImportingContacts(false);
     }
   };
 
@@ -238,7 +354,7 @@ export default function SocialApp() {
     try {
       await startLiveMutation.mutateAsync({ title: liveTitle });
       setLiveTitle("");
-      toast.success("تم بدء البث من الـ API");
+      toast.success("تم بدء البث");
       await utils.live.list.invalidate();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "تعذر بدء البث");
@@ -315,9 +431,107 @@ export default function SocialApp() {
     [conversationsQuery.data, selectedConversationId]
   );
 
+  const renderEmpty = (title: string, description: string) => (
+    <Card className={panelClass}>
+      <CardContent className="py-10 text-center">
+        <p className="text-lg font-semibold">{title}</p>
+        <p className="mt-2 text-sm text-muted-foreground">{description}</p>
+      </CardContent>
+    </Card>
+  );
+
+  const renderPostCard = (post: any, mode: "feed" | "profile" = "feed") => {
+    const postComments = commentsByPost[post.id] ?? [];
+    const isCommentsOpen = !!commentsOpen[post.id];
+    const isLoadingComments = !!commentsLoading[post.id];
+
+    return (
+      <Card key={post.id} className={panelClass}>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <Avatar>
+                <AvatarFallback>{post.author.slice(0, 1)}</AvatarFallback>
+              </Avatar>
+              <div>
+                <CardTitle className="text-base">{post.author}</CardTitle>
+                <CardDescription>
+                  {post.handle} · {post.time}
+                </CardDescription>
+              </div>
+            </div>
+            <Badge variant="secondary">{mode === "profile" ? "من صفحتي" : post.category}</Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="leading-8 whitespace-pre-wrap">{post.text}</p>
+          {post.mediaUrl && (
+            <a href={post.mediaUrl} target="_blank" rel="noreferrer" className="text-sm text-primary underline underline-offset-4">
+              فتح الوسائط المرفقة
+            </a>
+          )}
+
+          <div className="grid gap-2 sm:grid-cols-3">
+            <Button variant={post.liked ? "default" : "outline"} size="sm" onClick={() => handleToggleLike(post.id, post.liked)}>
+              {post.liked ? <Check className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
+              إعجاب {post.likes}
+            </Button>
+            <Button variant={isCommentsOpen ? "secondary" : "outline"} size="sm" onClick={() => handleToggleComments(post.id)}>
+              <MessageCircle className="w-4 h-4" />
+              تعليقات {post.comments}
+            </Button>
+            <Badge variant="outline" className="justify-center py-2 text-sm">
+              مشاركات {post.shares}
+            </Badge>
+          </div>
+
+          {isCommentsOpen && (
+            <div className="rounded-2xl border border-border/70 bg-background/50 p-3 space-y-3">
+              <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                {isLoadingComments && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    جاري تحميل التعليقات...
+                  </div>
+                )}
+
+                {!isLoadingComments && !postComments.length && (
+                  <p className="text-sm text-muted-foreground">لا توجد تعليقات بعد، ابدأ أول تعليق.</p>
+                )}
+
+                {postComments.map(comment => (
+                  <div key={comment.id} className={`rounded-2xl border px-3 py-2 ${comment.mine ? "border-primary/40 bg-primary/10" : "border-border/60 bg-card/70"}`}>
+                    <div className="flex items-center justify-between gap-3 mb-1">
+                      <p className="text-sm font-semibold">{comment.author}</p>
+                      <p className="text-xs text-muted-foreground">{comment.time}</p>
+                    </div>
+                    <p className="text-sm leading-7">{comment.text}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex gap-2 flex-wrap sm:flex-nowrap">
+                <Input
+                  value={commentText[post.id] ?? ""}
+                  onChange={(e) => setCommentText(current => ({ ...current, [post.id]: e.target.value }))}
+                  placeholder="اكتب تعليقك هنا"
+                  onKeyDown={(e) => e.key === "Enter" && handleAddComment(post.id)}
+                />
+                <Button onClick={() => handleAddComment(post.id)} disabled={!commentText[post.id]?.trim() || commentMutation.isPending}>
+                  <Send className="w-4 h-4" />
+                  إرسال
+                </Button>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    );
+  };
+
   if (isUserLoading || (!currentUser && !isUserLoading)) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-black text-white">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
       </div>
     );
@@ -326,10 +540,10 @@ export default function SocialApp() {
   const renderFeed = () => (
     <div className="grid gap-4 xl:grid-cols-[1.6fr,1fr]">
       <div className="space-y-4">
-        <Card className="border-0 shadow-lg">
+        <Card className={panelClass}>
           <CardHeader>
             <CardTitle>أنشئ منشور جديد</CardTitle>
-            <CardDescription>الويب هنا بقى API-first بالكامل للمنشورات والتعليقات والإعجابات.</CardDescription>
+            <CardDescription>الواجهة أصبحت داكنة بالكامل مع التعليقات التفاعلية والإحصاءات المحدثة.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <Textarea value={postText} onChange={(e) => setPostText(e.target.value)} placeholder="بماذا تفكر الآن؟" className="min-h-28" />
@@ -340,68 +554,24 @@ export default function SocialApp() {
           </CardContent>
         </Card>
 
-        {(feedQuery.data ?? []).map(post => (
-          <Card key={post.id} className="border-0 shadow-md">
-            <CardHeader>
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <Avatar>
-                    <AvatarFallback>{post.author.slice(0, 1)}</AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <CardTitle className="text-base">{post.author}</CardTitle>
-                    <CardDescription>
-                      {post.handle} · {post.time}
-                    </CardDescription>
-                  </div>
-                </div>
-                <Badge variant="secondary">{post.category}</Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <p className="leading-7">{post.text}</p>
-              {post.mediaUrl && (
-                <a href={post.mediaUrl} target="_blank" rel="noreferrer" className="text-sm text-primary underline">
-                  فتح الوسائط المرفقة
-                </a>
-              )}
-              <div className="flex flex-wrap gap-2">
-                <Button variant={post.liked ? "default" : "outline"} size="sm" onClick={() => handleToggleLike(post.id, post.liked)}>
-                  {post.liked ? <Check className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
-                  إعجاب {post.likes}
-                </Button>
-                <Badge variant="outline">تعليقات {post.comments}</Badge>
-                <Badge variant="outline">مشاركات {post.shares}</Badge>
-              </div>
-              <div className="flex gap-2">
-                <Input
-                  value={commentText[post.id] ?? ""}
-                  onChange={(e) => setCommentText(current => ({ ...current, [post.id]: e.target.value }))}
-                  placeholder="اكتب تعليقاً سريعاً"
-                />
-                <Button onClick={() => handleAddComment(post.id)} disabled={!commentText[post.id]?.trim() || commentMutation.isPending}>
-                  <Send className="w-4 h-4" />
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+        {(feedQuery.data ?? []).length === 0 && renderEmpty("لا توجد منشورات حالياً", "ابدأ أول منشور ليظهر في الرئيسية وصفحتك الشخصية.")}
+        {(feedQuery.data ?? []).map(post => renderPostCard(post))}
       </div>
 
       <div className="space-y-4">
-        <Card className="border-0 shadow-md">
+        <Card className={panelClass}>
           <CardHeader>
             <CardTitle>أصدقاؤك</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {(friendsQuery.data ?? []).length === 0 && <p className="text-sm text-muted-foreground">لسه ماعندكش أصدقاء على الحساب ده.</p>}
             {(friendsQuery.data ?? []).map(friend => (
-              <div key={friend.id} className="rounded-xl border p-3 flex items-center justify-between gap-3">
+              <div key={friend.id} className="rounded-xl border border-border/70 p-3 flex items-center justify-between gap-3">
                 <div>
                   <p className="font-semibold">{friend.name}</p>
                   <p className="text-sm text-muted-foreground">{friend.bio}</p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap justify-end">
                   <Button size="sm" variant="outline" onClick={() => handleCreateConversation(friend.id, friend.name)}>
                     <MessageCircle className="w-4 h-4" />
                     دردشة
@@ -415,21 +585,27 @@ export default function SocialApp() {
           </CardContent>
         </Card>
 
-        <Card className="border-0 shadow-md">
+        <Card className={panelClass}>
           <CardHeader>
             <CardTitle>اقتراحات</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {suggestions.map(user => (
-              <div key={user.id} className="rounded-xl border p-3 flex items-center justify-between gap-3">
+              <div key={user.id} className="rounded-xl border border-border/70 p-3 flex items-center justify-between gap-3">
                 <div>
                   <p className="font-semibold">{user.name}</p>
                   <p className="text-sm text-muted-foreground">{user.bio}</p>
                 </div>
-                <Button size="sm" onClick={() => handleToggleFriend(user.id, false)}>
-                  <UserPlus className="w-4 h-4" />
-                  إضافة
-                </Button>
+                <div className="flex gap-2 flex-wrap justify-end">
+                  <Button size="sm" onClick={() => handleToggleFriend(user.id, false)}>
+                    <UserPlus className="w-4 h-4" />
+                    إضافة
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => handleCreateConversation(user.id, user.name)}>
+                    <MessageCircle className="w-4 h-4" />
+                    محادثة
+                  </Button>
+                </div>
               </div>
             ))}
           </CardContent>
@@ -439,54 +615,119 @@ export default function SocialApp() {
   );
 
   const renderChat = () => (
-    <div className="grid gap-4 lg:grid-cols-[320px,1fr]">
-      <Card className="border-0 shadow-md">
-        <CardHeader>
-          <CardTitle>المحادثات</CardTitle>
-          <CardDescription>القائمة والرسائل شغالة مباشرة من الـ API.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {(conversationsQuery.data ?? []).map(conversation => (
-            <button
-              key={conversation.id}
-              type="button"
-              onClick={() => setSelectedConversationId(conversation.id)}
-              className={`w-full rounded-xl border p-3 text-right transition ${selectedConversationId === conversation.id ? "border-primary bg-primary/10" : "hover:bg-muted/60"}`}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="font-semibold">{conversation.name}</p>
-                  <p className="text-xs text-muted-foreground mt-1">{conversation.time}</p>
-                </div>
-                {conversation.unread > 0 && <Badge>{conversation.unread}</Badge>}
+    <div className="grid gap-4 lg:grid-cols-[350px,1fr]">
+      <div className="space-y-4">
+        <Card className={panelClass}>
+          <CardHeader>
+            <CardTitle>ابدأ محادثة جديدة</CardTitle>
+            <CardDescription>ابحث باسم الشخص أو رقمه، أو استورد دليل الجوال لو المتصفح يدعم ده.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={chatSearch}
+                  onChange={(e) => setChatSearch(e.target.value)}
+                  placeholder="ابحث عن شخص بالاسم أو الرقم"
+                  className="pr-10"
+                />
               </div>
-            </button>
-          ))}
+              <Button variant="outline" onClick={handleImportContacts} disabled={importingContacts}>
+                {importingContacts ? <Loader2 className="w-4 h-4 animate-spin" /> : <Phone className="w-4 h-4" />}
+                دليل الجوال
+              </Button>
+            </div>
 
-          {!(conversationsQuery.data ?? []).length && (
-            <p className="text-sm text-muted-foreground">ابدأ محادثة من قائمة الأصدقاء أو الاقتراحات.</p>
-          )}
-        </CardContent>
-      </Card>
+            <div className="space-y-2 max-h-[24rem] overflow-y-auto pr-1">
+              {searchablePeople.map(person => {
+                const isFriend = friendIds.has(person.id);
+                const imported = importedContactIdSet.has(person.id);
+                return (
+                  <div key={person.id} className="rounded-2xl border border-border/70 p-3 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-semibold">{person.name}</p>
+                          {imported && <Badge>من دليل الجوال</Badge>}
+                          <Badge variant="secondary">على يامن شات</Badge>
+                        </div>
+                        <p className="mt-1 text-sm text-muted-foreground">{person.phoneNumber || person.email || person.bio}</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 flex-wrap justify-end">
+                      {!isFriend && (
+                        <Button size="sm" variant="secondary" onClick={() => handleToggleFriend(person.id, false)}>
+                          <UserPlus className="w-4 h-4" />
+                          إضافة صديق
+                        </Button>
+                      )}
+                      <Button size="sm" onClick={() => handleCreateConversation(person.id, person.name)}>
+                        <MessageCircle className="w-4 h-4" />
+                        دردشة الآن
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
 
-      <Card className="border-0 shadow-md min-h-[70vh]">
+              {!searchablePeople.length && (
+                <p className="text-sm text-muted-foreground">لا يوجد أشخاص مطابقون للبحث حالياً.</p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className={panelClass}>
+          <CardHeader>
+            <CardTitle>المحادثات</CardTitle>
+            <CardDescription>الأشخاص ظاهرين فوق بعض مثل تطبيقات التواصل المعتادة.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {(conversationsQuery.data ?? []).map(conversation => (
+              <button
+                key={conversation.id}
+                type="button"
+                onClick={() => setSelectedConversationId(conversation.id)}
+                className={`w-full rounded-xl border p-3 text-right transition ${selectedConversationId === conversation.id ? "border-primary bg-primary/10" : "border-border/70 hover:bg-muted/30"}`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="font-semibold">{conversation.name}</p>
+                    <p className="text-xs text-muted-foreground mt-1">{conversation.time}</p>
+                  </div>
+                  {conversation.unread > 0 && <Badge>{conversation.unread}</Badge>}
+                </div>
+              </button>
+            ))}
+
+            {!(conversationsQuery.data ?? []).length && (
+              <p className="text-sm text-muted-foreground">ابدأ محادثة من قائمة الأشخاص بالأعلى.</p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className={`${panelClass} min-h-[72vh]`}>
         <CardHeader>
           <CardTitle>{selectedConversation?.name ?? "اختر محادثة"}</CardTitle>
-          <CardDescription>إرسال واستقبال الرسائل من الـ API مباشرة.</CardDescription>
+          <CardDescription>إرسال واستقبال الرسائل شغال بشكل مباشر من الواجهة.</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3 min-h-[50vh]">
-          {(messagesQuery.data ?? []).map(message => (
-            <div key={message.id} className={`max-w-[80%] rounded-2xl px-4 py-3 ${message.mine ? "mr-auto bg-primary text-primary-foreground" : "bg-secondary"}`}>
-              {!message.mine && <p className="text-xs mb-1 opacity-80">{message.senderName}</p>}
-              <p>{message.text}</p>
-              <p className="text-xs mt-2 opacity-70">{message.time}</p>
-            </div>
-          ))}
-          {selectedConversationId && !(messagesQuery.data ?? []).length && !messagesQuery.isLoading && (
-            <p className="text-sm text-muted-foreground">لا توجد رسائل بعد، ابدأ أول رسالة الآن.</p>
-          )}
+        <CardContent className="space-y-3 min-h-[52vh] flex flex-col">
+          <div className="flex-1 space-y-3 overflow-y-auto pr-1">
+            {(messagesQuery.data ?? []).map(message => (
+              <div key={message.id} className={`max-w-[85%] rounded-2xl px-4 py-3 ${message.mine ? "mr-auto bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground"}`}>
+                {!message.mine && <p className="text-xs mb-1 opacity-80">{message.senderName}</p>}
+                <p className="leading-7">{message.text}</p>
+                <p className="text-xs mt-2 opacity-70">{message.time}</p>
+              </div>
+            ))}
+            {selectedConversationId && !(messagesQuery.data ?? []).length && !messagesQuery.isLoading && (
+              <p className="text-sm text-muted-foreground">لا توجد رسائل بعد، ابدأ أول رسالة الآن.</p>
+            )}
+          </div>
         </CardContent>
-        <CardFooter className="border-t pt-4 gap-3 flex-wrap">
+        <CardFooter className="border-t border-border/70 pt-4 gap-3 flex-wrap">
           <Input
             value={chatMessage}
             onChange={(e) => setChatMessage(e.target.value)}
@@ -506,14 +747,14 @@ export default function SocialApp() {
 
   const renderStories = () => (
     <div className="space-y-4">
-      <Card className="border-0 shadow-md">
+      <Card className={panelClass}>
         <CardHeader>
           <CardTitle>نشر ستوري</CardTitle>
           <CardDescription>أضف رابط صورة أو فيديو وسيتم إنشاء ستوري عبر الـ API.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <Input value={storyForm.mediaUrl} onChange={(e) => setStoryForm(current => ({ ...current, mediaUrl: e.target.value }))} placeholder="https://example.com/image.jpg" />
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <Button variant={storyForm.mediaType === "image" ? "default" : "outline"} onClick={() => setStoryForm(current => ({ ...current, mediaType: "image" }))}>صورة</Button>
             <Button variant={storyForm.mediaType === "video" ? "default" : "outline"} onClick={() => setStoryForm(current => ({ ...current, mediaType: "video" }))}>فيديو</Button>
             <Button onClick={handleCreateStory} disabled={!storyForm.mediaUrl.trim() || createStoryMutation.isPending}>
@@ -524,15 +765,16 @@ export default function SocialApp() {
         </CardContent>
       </Card>
 
+      {(storiesQuery.data ?? []).length === 0 && renderEmpty("لا توجد ستوري حالياً", "أضف أول ستوري من أعلى الصفحة.")}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {(storiesQuery.data ?? []).map(story => (
-          <Card key={story.id} className="border-0 shadow-md">
+          <Card key={story.id} className={panelClass}>
             <CardHeader>
               <CardTitle className="text-base">{story.creator}</CardTitle>
               <CardDescription>{story.title} · {story.time}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="rounded-2xl border bg-muted/40 p-4 min-h-36 flex items-center justify-center text-center">
+              <div className="rounded-2xl border border-border/70 bg-muted/20 p-4 min-h-36 flex items-center justify-center text-center">
                 <div>
                   <p className="font-medium">{story.mediaType === "video" ? "معاينة ستوري فيديو" : "معاينة ستوري صورة"}</p>
                   <p className="text-sm text-muted-foreground mt-2">المشاهدات: {story.views}</p>
@@ -553,10 +795,10 @@ export default function SocialApp() {
 
   const renderLive = () => (
     <div className="space-y-4">
-      <Card className="border-0 shadow-md">
+      <Card className={panelClass}>
         <CardHeader>
           <CardTitle>ابدأ بث مباشر</CardTitle>
-          <CardDescription>بدء وإنهاء البث تم ربطه بالـ API المباشر.</CardDescription>
+          <CardDescription>بدء وإنهاء البث مربوطين بالـ API.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3 sm:flex-row">
           <Input value={liveTitle} onChange={(e) => setLiveTitle(e.target.value)} placeholder="عنوان البث" className="flex-1" />
@@ -567,9 +809,10 @@ export default function SocialApp() {
         </CardContent>
       </Card>
 
+      {(liveQuery.data ?? []).length === 0 && renderEmpty("لا يوجد بث مباشر حالياً", "لما تبدأ بث جديد هيظهر هنا فوراً.")}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {(liveQuery.data ?? []).map(stream => (
-          <Card key={stream.id} className="border-0 shadow-md">
+          <Card key={stream.id} className={panelClass}>
             <CardHeader>
               <div className="flex items-center justify-between gap-2">
                 <Badge variant={stream.status === "ended" ? "secondary" : "destructive"}>{stream.status === "ended" ? "منتهي" : "مباشر"}</Badge>
@@ -596,12 +839,12 @@ export default function SocialApp() {
   );
 
   const renderNotifications = () => (
-    <Card className="border-0 shadow-md">
+    <Card className={panelClass}>
       <CardHeader>
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <CardTitle>الإشعارات</CardTitle>
-            <CardDescription>قراءة الإشعارات وتحديث حالتها من الـ API.</CardDescription>
+            <CardDescription>قراءة الإشعارات وتحديث حالتها مباشرة.</CardDescription>
           </div>
           <div className="flex gap-2">
             <Badge>{unreadNotifications} غير مقروء</Badge>
@@ -612,8 +855,9 @@ export default function SocialApp() {
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
+        {!(notificationsQuery.data ?? []).length && <p className="text-sm text-muted-foreground">لا توجد إشعارات حالياً.</p>}
         {(notificationsQuery.data ?? []).map(item => (
-          <div key={item.id} className="rounded-2xl border p-4 flex items-start justify-between gap-3">
+          <div key={item.id} className="rounded-2xl border border-border/70 p-4 flex items-start justify-between gap-3">
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <p className="font-semibold">{item.title}</p>
@@ -634,7 +878,7 @@ export default function SocialApp() {
 
   const renderMarket = () => (
     <div className="space-y-4">
-      <Card className="border-0 shadow-md">
+      <Card className={panelClass}>
         <CardHeader>
           <CardTitle>نشر منتج جديد</CardTitle>
           <CardDescription>السوق متصل مباشرة بالـ API.</CardDescription>
@@ -649,9 +893,10 @@ export default function SocialApp() {
         </CardContent>
       </Card>
 
+      {(marketQuery.data ?? []).length === 0 && renderEmpty("لا توجد منتجات منشورة", "جرّب إضافة أول منتج من النموذج بالأعلى.")}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {(marketQuery.data ?? []).map(product => (
-          <Card key={product.id} className="border-0 shadow-md">
+          <Card key={product.id} className={panelClass}>
             <CardHeader>
               <CardTitle className="text-base">{product.name}</CardTitle>
               <CardDescription>{product.store}</CardDescription>
@@ -660,7 +905,7 @@ export default function SocialApp() {
               <Badge>{product.price}</Badge>
               <p className="text-sm text-muted-foreground">{product.city}</p>
               <p className="text-sm text-muted-foreground">{product.posted}</p>
-              <p className="text-sm leading-6">{product.description}</p>
+              <p className="text-sm leading-7">{product.description}</p>
             </CardContent>
           </Card>
         ))}
@@ -668,16 +913,77 @@ export default function SocialApp() {
     </div>
   );
 
+  const renderProfile = () => (
+    <div className="space-y-4">
+      <Card className={panelClass}>
+        <CardContent className="py-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-4">
+            <Avatar className="h-20 w-20 border border-border/70">
+              <AvatarFallback className="text-2xl">{currentUser?.name?.slice(0, 1) ?? "ي"}</AvatarFallback>
+            </Avatar>
+            <div>
+              <h2 className="text-2xl font-bold">الملف الشخصي</h2>
+              <p className="mt-1 text-lg">{currentUser?.name}</p>
+              <p className="text-sm text-muted-foreground">{currentUser?.email ?? currentUser?.phone_number ?? "بدون وسيلة تواصل"}</p>
+            </div>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <Button variant="outline" onClick={() => setActiveTab("feed")}>العودة للرئيسية</Button>
+            <Button onClick={() => setActiveTab("settings")}>الإعدادات</Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Card className={panelClass}>
+          <CardContent className="py-6">
+            <p className="text-sm text-muted-foreground">المنشورات</p>
+            <p className="mt-2 text-3xl font-bold">{profileStats.posts}</p>
+          </CardContent>
+        </Card>
+        <Card className={panelClass}>
+          <CardContent className="py-6">
+            <p className="text-sm text-muted-foreground">المشاهدات التقديرية</p>
+            <p className="mt-2 text-3xl font-bold">{profileStats.estimatedViews}</p>
+          </CardContent>
+        </Card>
+        <Card className={panelClass}>
+          <CardContent className="py-6">
+            <p className="text-sm text-muted-foreground">الإعجابات</p>
+            <p className="mt-2 text-3xl font-bold">{profileStats.likes}</p>
+          </CardContent>
+        </Card>
+        <Card className={panelClass}>
+          <CardContent className="py-6">
+            <p className="text-sm text-muted-foreground">التعليقات</p>
+            <p className="mt-2 text-3xl font-bold">{profileStats.comments}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className={panelClass}>
+        <CardHeader>
+          <CardTitle>منشورات صفحتي</CardTitle>
+          <CardDescription>تعرض الصفحة منشوراتك بنفس أسلوب الرئيسية مع الإحصاءات والتعليقات.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {!myPosts.length && <p className="text-sm text-muted-foreground">لا توجد منشورات لك حالياً. انشر أول منشور من الرئيسية وسيظهر هنا مباشرة.</p>}
+          {myPosts.map(post => renderPostCard(post, "profile"))}
+        </CardContent>
+      </Card>
+    </div>
+  );
+
   const renderSettings = () => (
     <div className="grid gap-4 xl:grid-cols-[1.4fr,1fr]">
-      <Card className="border-0 shadow-md">
+      <Card className={panelClass}>
         <CardHeader>
           <CardTitle>المجموعات</CardTitle>
-          <CardDescription>الانضمام والمغادرة شغالين بالـ API.</CardDescription>
+          <CardDescription>الانضمام والمغادرة شغالين من الواجهة.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {(groupsQuery.data ?? []).map(group => (
-            <div key={group.id} className="rounded-2xl border p-4 flex items-center justify-between gap-3">
+            <div key={group.id} className="rounded-2xl border border-border/70 p-4 flex items-center justify-between gap-3">
               <div>
                 <p className="font-semibold">{group.name}</p>
                 <p className="text-sm text-muted-foreground">{group.description}</p>
@@ -691,16 +997,20 @@ export default function SocialApp() {
         </CardContent>
       </Card>
 
-      <Card className="border-0 shadow-md">
+      <Card className={panelClass}>
         <CardHeader>
           <CardTitle>الحساب</CardTitle>
-          <CardDescription>بيانات الحساب الحالي من جلسة الـ API.</CardDescription>
+          <CardDescription>بيانات الحساب الحالي وإجراءات التحكم.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="rounded-2xl border p-4">
+          <div className="rounded-2xl border border-border/70 p-4">
             <p className="font-semibold">{currentUser?.name}</p>
             <p className="text-sm text-muted-foreground mt-1">{currentUser?.email ?? currentUser?.phone_number ?? "بدون وسيلة تواصل"}</p>
           </div>
+          <Button variant="outline" className="w-full" onClick={() => setActiveTab("profile")}>
+            <UserCircle2 className="w-4 h-4" />
+            الملف الشخصي
+          </Button>
           <Button variant="outline" className="w-full" onClick={async () => { await invalidateCommon(); toast.success("تم تحديث البيانات من السيرفر"); }}>
             تحديث كل البيانات
           </Button>
@@ -714,12 +1024,12 @@ export default function SocialApp() {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-secondary/20">
-      <header className="sticky top-0 z-20 border-b bg-background/90 backdrop-blur">
+    <div className="min-h-screen bg-[#050505] text-white">
+      <header className="sticky top-0 z-20 border-b border-border/80 bg-black/90 backdrop-blur">
         <div className="mx-auto max-w-7xl px-4 py-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h1 className="text-2xl font-bold">يامن شات — Web API-first</h1>
-            <p className="text-sm text-muted-foreground">مرحباً {currentUser?.name}، الجزء المتبقي من الواجهة بقى مربوط بالـ API.</p>
+            <h1 className="text-2xl font-bold">يامن شات</h1>
+            <p className="text-sm text-muted-foreground">مرحباً {currentUser?.name}، تم تحسين الواجهة بالثيم الأسود والملف الشخصي والدردشة والتعليقات.</p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             {navItems.map(item => {
@@ -741,7 +1051,7 @@ export default function SocialApp() {
           <Card className="border-primary/30 bg-primary/5">
             <CardContent className="py-3 flex items-center gap-3 text-sm">
               <Loader2 className="w-4 h-4 animate-spin text-primary" />
-              جارٍ تنفيذ العملية ورفع التحديثات من وإلى الـ API...
+              جارٍ تنفيذ العملية وتحديث البيانات...
             </CardContent>
           </Card>
         )}
@@ -752,6 +1062,7 @@ export default function SocialApp() {
         {activeTab === "live" && renderLive()}
         {activeTab === "notifications" && renderNotifications()}
         {activeTab === "market" && renderMarket()}
+        {activeTab === "profile" && renderProfile()}
         {activeTab === "settings" && renderSettings()}
       </main>
     </div>
