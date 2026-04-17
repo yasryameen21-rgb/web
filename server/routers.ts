@@ -27,6 +27,19 @@ const createUserInput = z.object({
   dateOfBirth: z.date().optional(),
   contactMethod: z.enum(["phone", "email"]),
   contact: z.string().min(1, "رقم الجوال أو البريد الإلكتروني مطلوب"),
+  password: z.string().min(8, "كلمة المرور لازم تكون 8 أحرف على الأقل"),
+  verificationCode: z.string().min(4, "رمز التحقق مطلوب"),
+});
+
+const loginInput = z.object({
+  identifier: z.string().min(1, "البريد الإلكتروني أو رقم الجوال مطلوب"),
+  password: z.string().min(1, "كلمة المرور مطلوبة"),
+  verificationCode: z.string().min(4, "رمز التحقق مطلوب"),
+});
+
+const sendOtpInput = z.object({
+  contactMethod: z.enum(["phone", "email"]),
+  contact: z.string().min(1, "جهة الاتصال مطلوبة"),
 });
 
 const createPostInput = z.object({
@@ -104,6 +117,26 @@ const groupMembershipInput = z.object({
   groupId: z.string(),
   joined: z.boolean().default(false),
 });
+
+function normalizeIdentifier(identifier: string) {
+  const trimmed = identifier.trim();
+  const looksLikeEmail = trimmed.includes("@");
+
+  if (looksLikeEmail) {
+    return {
+      loginEmail: trimmed.toLowerCase(),
+      contact: trimmed.toLowerCase(),
+      contactMethod: "email" as const,
+    };
+  }
+
+  const normalizedPhone = trimmed.replace(/\s+/g, "").replace(/-/g, "");
+  return {
+    loginEmail: `${normalizedPhone}@familyhub.local`,
+    contact: normalizedPhone,
+    contactMethod: "phone" as const,
+  };
+}
 
 function buildUserDirectory(users: BackendUser[], currentUserId?: string | null) {
   return users
@@ -254,6 +287,71 @@ async function requireApiAuth(accessToken: string | null) {
 export const appRouter = router({
   system: systemRouter,
   auth: router({
+    sendOtp: publicProcedure.input(sendOtpInput).mutation(async ({ input }) => {
+      const payload =
+        input.contactMethod === "email"
+          ? { email: input.contact.trim().toLowerCase() }
+          : { phone_number: input.contact.trim().replace(/\s+/g, "").replace(/-/g, "") };
+
+      return apiRequest<{ success: boolean; message: string }>("/api/auth/send-otp", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    }),
+    login: publicProcedure.input(loginInput).mutation(async ({ input, ctx }) => {
+      const normalized = normalizeIdentifier(input.identifier);
+
+      await apiRequest<{
+        access_token: string;
+        refresh_token: string;
+        token_type: string;
+        expires_in: number;
+      }>("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({
+          email: normalized.loginEmail,
+          password: input.password,
+        }),
+      });
+
+      const otpLoginPath = normalized.contactMethod === "email" ? "/api/auth/login-email" : "/api/auth/login-phone";
+      const otpPayload = normalized.contactMethod === "email"
+        ? { email: normalized.contact, otp_code: input.verificationCode }
+        : { phone_number: normalized.contact, otp_code: input.verificationCode };
+
+      const tokenResponse = await apiRequest<{
+        access_token: string;
+        refresh_token: string;
+        token_type: string;
+        expires_in: number;
+      }>(otpLoginPath, {
+        method: "POST",
+        body: JSON.stringify(otpPayload),
+      });
+
+      const currentUser = await fetchCurrentUser(tokenResponse.access_token);
+      const authResponse = {
+        ...tokenResponse,
+        user_id: currentUser.id,
+        display_name: currentUser.name,
+        email: currentUser.email,
+        phone_number: currentUser.phone_number ?? null,
+        profile: {
+          id: `profile_${currentUser.id}`,
+          user_id: currentUser.id,
+          first_name: currentUser.name.split(" ")[0] ?? currentUser.name,
+          last_name: currentUser.name.split(" ").slice(1).join(" ") || currentUser.name.split(" ")[0] || currentUser.name,
+          display_name: currentUser.name,
+          date_of_birth: null,
+          contact_method: normalized.contactMethod,
+          contact: normalized.contact,
+          created_at: currentUser.created_at,
+        },
+      };
+
+      setApiSession(ctx.req, ctx.res, authResponse);
+      return { success: true, user: currentUser };
+    }),
     me: publicProcedure.query(async ({ ctx }) => {
       const session = getApiSession(ctx.req);
       if (!session.accessToken) {
@@ -328,6 +426,8 @@ export const appRouter = router({
           date_of_birth: input.dateOfBirth?.toISOString(),
           contact_method: input.contactMethod,
           contact: input.contact,
+          password: input.password,
+          verification_code: input.verificationCode,
         }),
       });
 
