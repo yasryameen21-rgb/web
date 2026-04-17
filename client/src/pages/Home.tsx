@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,7 +7,7 @@ import { Mail, Phone, Download } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 
-const GOOGLE_DRIVE_LINK = "https://drive.google.com/uc?export=download&id=YOUR_FILE_ID";
+const APP_DOWNLOAD_URL = import.meta.env.VITE_ANDROID_APP_URL?.trim() || "";
 
 export default function Home() {
   const [, setLocation] = useLocation();
@@ -15,6 +15,7 @@ export default function Home() {
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const { data: currentUser } = trpc.auth.me.useQuery();
+  const isDownloadReady = useMemo(() => /^https?:\/\//.test(APP_DOWNLOAD_URL), []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,6 +35,15 @@ export default function Home() {
 
   const handleCreateAccount = () => {
     setLocation("/signup");
+  };
+
+  const handleDownloadClick = () => {
+    if (isDownloadReady) {
+      window.open(APP_DOWNLOAD_URL, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    toast.info("رابط تنزيل التطبيق لسه ما اترفعش في الإعدادات، ضيف VITE_ANDROID_APP_URL علشان الزر يشتغل");
   };
 
   return (
@@ -148,16 +158,22 @@ export default function Home() {
           </Card>
 
           {/* زر تنزيل التطبيق */}
-          <div className="flex justify-center pt-4">
-            <a
-              href={GOOGLE_DRIVE_LINK}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-6 py-3 bg-accent text-accent-foreground rounded-lg font-semibold smooth-transition hover:shadow-lg hover:scale-105"
-            >
-              <Download className="w-5 h-5" />
-              تنزيل التطبيق
-            </a>
+          <div className="space-y-3 pt-4">
+            <div className="flex justify-center">
+              <Button
+                type="button"
+                onClick={handleDownloadClick}
+                className="inline-flex h-auto items-center gap-2 px-6 py-3 bg-accent text-accent-foreground rounded-lg font-semibold smooth-transition hover:shadow-lg hover:scale-105"
+              >
+                <Download className="w-5 h-5" />
+                {isDownloadReady ? "تنزيل التطبيق" : "رابط التطبيق غير مضاف بعد"}
+              </Button>
+            </div>
+            {!isDownloadReady && (
+              <p className="text-center text-sm text-muted-foreground">
+                ضيف رابط APK أو صفحة التنزيل داخل المتغير <span className="font-semibold">VITE_ANDROID_APP_URL</span> علشان الزر يشتغل مباشرة.
+              </p>
+            )}
           </div>
         </div>
       </div>
