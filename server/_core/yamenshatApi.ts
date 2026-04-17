@@ -1,305 +1,337 @@
 import type { Request, Response } from "express";
+import cookie from "cookie";
 import { ONE_YEAR_MS } from "@shared/const";
 import { getSessionCookieOptions } from "./cookies";
 
-type ContactMethod = "phone" | "email";
+export const API_ACCESS_COOKIE_NAME = "yamenshat_api_access_token";
+export const API_REFRESH_COOKIE_NAME = "yamenshat_api_refresh_token";
+export const API_PROFILE_COOKIE_NAME = "yamenshat_api_profile";
 
-const ACCESS_TOKEN_COOKIE = "yamenshat_api_access_token";
-const REFRESH_TOKEN_COOKIE = "yamenshat_api_refresh_token";
-const PROFILE_COOKIE = "yamenshat_api_profile";
-
-function getApiBaseUrl() {
-  return (
-    process.env.YAMENSHAT_API_BASE_URL ||
-    process.env.API_BASE_URL ||
-    process.env.OAUTH_SERVER_URL ||
-    "https://api.yamenshat.local"
-  );
-}
-
-function normalizeUrl(pathname: string) {
-  if (/^https?:\/\//i.test(pathname)) {
-    return pathname;
-  }
-
-  const base = getApiBaseUrl().replace(/\/$/, "");
-  const path = pathname.startsWith("/") ? pathname : `/${pathname}`;
-  return `${base}${path}`;
-}
-
-function parseCookies(cookieHeader?: string | string[]) {
-  const raw = Array.isArray(cookieHeader) ? cookieHeader.join("; ") : cookieHeader || "";
-  return raw
-    .split(";")
-    .map(part => part.trim())
-    .filter(Boolean)
-    .reduce<Record<string, string>>((acc, pair) => {
-      const index = pair.indexOf("=");
-      if (index === -1) return acc;
-      const key = decodeURIComponent(pair.slice(0, index).trim());
-      const value = decodeURIComponent(pair.slice(index + 1).trim());
-      acc[key] = value;
-      return acc;
-    }, {});
-}
-
-export type ApiProfile = {
+export type OnboardingProfile = {
   id: string;
   user_id: string;
   first_name: string;
   last_name: string;
   display_name: string;
   date_of_birth?: string | null;
-  contact_method: ContactMethod;
+  contact_method: "phone" | "email";
   contact: string;
   created_at: string;
 };
 
-export type ApiSessionPayload = {
+export type OnboardingAuthResponse = {
   access_token: string;
-  refresh_token?: string;
-  token_type?: string;
-  expires_in?: number;
+  refresh_token: string;
+  token_type: string;
+  expires_in: number;
   user_id: string;
   display_name: string;
   email?: string | null;
   phone_number?: string | null;
-  profile: ApiProfile;
-};
-
-export type ApiSession = {
-  accessToken: string | null;
-  refreshToken: string | null;
-  profile: ApiProfile | null;
+  profile: OnboardingProfile;
 };
 
 export type BackendUser = {
   id: string;
   name: string;
-  email?: string | null;
+  email: string;
   phone_number?: string | null;
   bio?: string | null;
-  role?: string;
-  is_verified?: boolean;
-  is_banned?: boolean;
-  dark_mode_enabled?: boolean;
-  primary_color?: string | null;
-  profile_image_url?: string | null;
-  cover_image_url?: string | null;
+  role: string;
+  is_verified: boolean;
+  is_banned: boolean;
+  dark_mode_enabled: boolean;
+  primary_color: string;
   created_at: string;
   updated_at: string;
   last_login?: string | null;
+  profile_image_url?: string | null;
+  cover_image_url?: string | null;
 };
 
 export type BackendPost = {
   id: string;
   user_id: string;
   content: string;
-  post_type?: string;
-  group_id?: string | null;
+  post_type: string;
   media_url?: string | null;
-  shares_count?: number;
-  comments_count?: number;
+  group_id?: string | null;
+  is_hidden: boolean;
+  shares_count: number;
   reactions?: Record<string, string[]>;
-  is_hidden?: boolean;
+  link_preview_url?: string | null;
+  link_preview_title?: string | null;
+  link_preview_description?: string | null;
+  link_preview_image?: string | null;
   created_at: string;
   updated_at: string;
+  comments_count: number;
 };
 
 export type BackendMarketplaceItem = {
   id: string;
-  seller_id?: string;
+  seller_id: string;
+  group_id?: string | null;
   title: string;
   description: string;
   price: number;
   currency: string;
-  category?: string | null;
-  status?: string | null;
+  category: string;
+  status: string;
   location?: string | null;
-  image_urls?: string[];
+  image_urls: string[];
   created_at: string;
   updated_at: string;
 };
 
 export type BackendGroup = {
-  id?: string;
-  groupId?: string;
+  id: string;
   name: string;
   description?: string | null;
-  members_count?: number;
+  group_type: string;
+  admin_id: string;
+  group_image_url?: string | null;
+  members_count: number;
+  created_at: string;
 };
 
 export type BackendNotification = {
   id: string;
+  user_id: string;
   title: string;
   message: string;
   notification_type: string;
+  related_id?: string | null;
   is_read: boolean;
   created_at: string;
+  updated_at: string;
 };
 
 export type BackendConversation = {
   id: string;
   name?: string | null;
-  unread_count?: number;
-  is_muted?: boolean;
-  is_pinned?: boolean;
+  is_group_chat: boolean;
+  is_muted: boolean;
+  is_pinned: boolean;
+  unread_count: number;
   created_at: string;
   last_message_time?: string | null;
 };
 
 export type BackendMessage = {
   id: string;
+  conversation_id: string;
   sender_id: string;
   content: string;
-  message_type?: string;
+  message_type: string;
   media_url?: string | null;
-  reply_to_message_id?: string | null;
+  is_read: boolean;
+  is_encrypted: boolean;
+  encryption_v: string;
   created_at: string;
+  updated_at: string;
+  edited_at?: string | null;
+  reactions?: Record<string, unknown>;
 };
 
 export type BackendStory = {
   id: string;
   user_id: string;
-  media_type: "image" | "video";
   media_url: string;
-  view_count: number;
+  media_type: string;
   created_at: string;
+  updated_at: string;
+  expires_at: string;
+  view_count: number;
 };
 
 export type BackendLiveStream = {
   id: string;
   host_id: string;
+  conversation_id?: string | null;
   title?: string | null;
+  description?: string | null;
   status: string;
+  sdp_offer?: string | null;
+  sdp_answer?: string | null;
   viewer_count: number;
+  peak_viewer_count: number;
+  is_recording_enabled: boolean;
+  recording_status?: string | null;
+  recording_url?: string | null;
+  recording_duration: number;
+  recording_size_mb: number;
+  thumbnail_url?: string | null;
   started_at: string;
+  ended_at?: string | null;
+  recording_completed_at?: string | null;
 };
 
-export type ApiRequestOptions = {
-  method?: string;
-  body?: BodyInit | null;
-  accessToken?: string | null;
-  headers?: HeadersInit;
+export type ApiSession = {
+  accessToken: string | null;
+  refreshToken: string | null;
+  profile: OnboardingProfile | null;
 };
 
-export async function apiRequest<T>(pathname: string, options: ApiRequestOptions = {}): Promise<T> {
-  const headers = new Headers(options.headers ?? {});
+export class BackendApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly payload?: unknown
+  ) {
+    super(message);
+    this.name = "BackendApiError";
+  }
+}
 
-  if (options.body && !headers.has("content-type")) {
-    headers.set("content-type", "application/json");
+function getApiBaseUrl() {
+  const baseUrl =
+    process.env.YAMENSHAT_API_BASE_URL ??
+    process.env.VITE_API_BASE_URL ??
+    "http://127.0.0.1:8000";
+
+  return baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+}
+
+function parseCookies(req: Request) {
+  return cookie.parse(req.headers.cookie ?? "");
+}
+
+function decodeProfile(rawValue?: string): OnboardingProfile | null {
+  if (!rawValue) return null;
+
+  try {
+    return JSON.parse(decodeURIComponent(rawValue)) as OnboardingProfile;
+  } catch {
+    return null;
+  }
+}
+
+function encodeProfile(profile: OnboardingProfile) {
+  return encodeURIComponent(JSON.stringify(profile));
+}
+
+function extractErrorMessage(payload: unknown, fallback: string) {
+  if (!payload || typeof payload !== "object") return fallback;
+
+  const record = payload as Record<string, unknown>;
+  const detail = record.detail ?? record.message;
+
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map(item => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object" && "msg" in item) {
+          return String((item as Record<string, unknown>).msg);
+        }
+        return JSON.stringify(item);
+      })
+      .join("، ");
   }
 
-  if (!headers.has("accept")) {
-    headers.set("accept", "application/json");
-  }
-
-  if (options.accessToken) {
-    headers.set("authorization", `Bearer ${options.accessToken}`);
-  }
-
-  const response = await fetch(normalizeUrl(pathname), {
-    method: options.method ?? "GET",
-    headers,
-    body: options.body ?? null,
-  });
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new Error(`API request failed (${response.status} ${response.statusText})${detail ? `: ${detail}` : ""}`);
-  }
-
-  const contentType = response.headers.get("content-type") || "";
-  if (contentType.includes("application/json")) {
-    return (await response.json()) as T;
-  }
-
-  return (await response.text()) as T;
+  return fallback;
 }
 
 export function getApiSession(req: Request): ApiSession {
-  const cookies = parseCookies(req.headers.cookie);
-  const profileRaw = cookies[PROFILE_COOKIE];
-
-  let profile: ApiProfile | null = null;
-  if (profileRaw) {
-    try {
-      profile = JSON.parse(profileRaw) as ApiProfile;
-    } catch {
-      profile = null;
-    }
-  }
-
+  const parsed = parseCookies(req);
   return {
-    accessToken: cookies[ACCESS_TOKEN_COOKIE] || null,
-    refreshToken: cookies[REFRESH_TOKEN_COOKIE] || null,
-    profile,
+    accessToken: parsed[API_ACCESS_COOKIE_NAME] ?? null,
+    refreshToken: parsed[API_REFRESH_COOKIE_NAME] ?? null,
+    profile: decodeProfile(parsed[API_PROFILE_COOKIE_NAME]),
   };
 }
 
-export function setApiSession(req: Request, res: Response, payload: ApiSessionPayload) {
-  const cookieOptions = getSessionCookieOptions(req);
-  const maxAge = (payload.expires_in ? payload.expires_in * 1000 : ONE_YEAR_MS);
+export function setApiSession(req: Request, res: Response, auth: OnboardingAuthResponse) {
+  const options = getSessionCookieOptions(req);
 
-  res.cookie(ACCESS_TOKEN_COOKIE, payload.access_token, {
-    ...cookieOptions,
-    maxAge,
+  res.cookie(API_ACCESS_COOKIE_NAME, auth.access_token, {
+    ...options,
+    maxAge: Math.max(auth.expires_in * 1000, ONE_YEAR_MS),
   });
-
-  if (payload.refresh_token) {
-    res.cookie(REFRESH_TOKEN_COOKIE, payload.refresh_token, {
-      ...cookieOptions,
-      maxAge: ONE_YEAR_MS,
-    });
-  }
-
-  res.cookie(PROFILE_COOKIE, JSON.stringify(payload.profile), {
-    ...cookieOptions,
+  res.cookie(API_REFRESH_COOKIE_NAME, auth.refresh_token, {
+    ...options,
+    maxAge: ONE_YEAR_MS,
+  });
+  res.cookie(API_PROFILE_COOKIE_NAME, encodeProfile(auth.profile), {
+    ...options,
     maxAge: ONE_YEAR_MS,
   });
 }
 
 export function clearApiSession(req: Request, res: Response) {
-  const cookieOptions = getSessionCookieOptions(req);
-  for (const name of [ACCESS_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE, PROFILE_COOKIE]) {
-    res.clearCookie(name, { ...cookieOptions, maxAge: -1 });
+  const options = getSessionCookieOptions(req);
+  for (const cookieName of [
+    API_ACCESS_COOKIE_NAME,
+    API_REFRESH_COOKIE_NAME,
+    API_PROFILE_COOKIE_NAME,
+  ]) {
+    res.clearCookie(cookieName, { ...options, maxAge: -1 });
   }
 }
 
-export function formatRelativeArabicDate(input: string | number | Date) {
-  const date = new Date(input);
-  if (Number.isNaN(date.getTime())) {
-    return "منذ لحظات";
+export async function apiRequest<T>(
+  path: string,
+  init: RequestInit & { accessToken?: string | null } = {}
+): Promise<T> {
+  const headers = new Headers(init.headers ?? {});
+
+  if (!headers.has("accept")) {
+    headers.set("accept", "application/json");
   }
 
-  const diffMs = date.getTime() - Date.now();
-  const absMs = Math.abs(diffMs);
-  const minute = 60_000;
-  const hour = 60 * minute;
-  const day = 24 * hour;
-
-  const rtf = new Intl.RelativeTimeFormat("ar", { numeric: "auto" });
-
-  if (absMs < hour) {
-    return rtf.format(Math.round(diffMs / minute), "minute");
-  }
-  if (absMs < day) {
-    return rtf.format(Math.round(diffMs / hour), "hour");
-  }
-  if (absMs < 30 * day) {
-    return rtf.format(Math.round(diffMs / day), "day");
+  if (init.body && !headers.has("content-type")) {
+    headers.set("content-type", "application/json");
   }
 
-  return new Intl.DateTimeFormat("ar-EG", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  }).format(date);
+  if (init.accessToken) {
+    headers.set("authorization", `Bearer ${init.accessToken}`);
+  }
+
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
+    ...init,
+    headers,
+  });
+
+  const contentType = response.headers.get("content-type") ?? "";
+  const payload = contentType.includes("application/json")
+    ? await response.json().catch(() => null)
+    : await response.text().catch(() => "");
+
+  if (!response.ok) {
+    throw new BackendApiError(
+      extractErrorMessage(payload, `Backend API request failed with status ${response.status}`),
+      response.status,
+      payload
+    );
+  }
+
+  return payload as T;
 }
 
-export async function fetchCurrentUser(accessToken: string): Promise<BackendUser> {
+export async function fetchCurrentUser(accessToken: string) {
   return apiRequest<BackendUser>("/api/users/me", {
     method: "GET",
     accessToken,
   });
+}
+
+export function formatRelativeArabicDate(value?: string | null) {
+  if (!value) return "الآن";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "الآن";
+
+  const diffMs = Date.now() - date.getTime();
+  const diffMinutes = Math.max(0, Math.floor(diffMs / 60000));
+
+  if (diffMinutes < 1) return "الآن";
+  if (diffMinutes < 60) return `منذ ${diffMinutes} دقيقة`;
+
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `منذ ${diffHours} ساعة`;
+
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays === 1) return "أمس";
+  return `منذ ${diffDays} يوم`;
 }

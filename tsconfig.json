@@ -1,6 +1,16 @@
 {
-  "include": ["client/src/**/*", "shared/**/*", "server/**/*"],
-  "exclude": ["node_modules", "build", "dist", "**/*.test.ts"],
+  "include": [
+    "client/src/main.tsx",
+    "shared/**/*",
+    "server/_core/index.ts",
+    "server/routers.ts",
+    "server/db.ts",
+    "server/storage.ts",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "drizzle.config.ts"
+  ],
+  "exclude": ["node_modules", "build", "dist", "**/*.test.ts", "client/src/pages/ComponentShowcase.tsx", "client/src/pages/page.tsx"],
   "compilerOptions": {
     "incremental": true,
     "tsBuildInfoFile": "./node_modules/typescript/tsbuildinfo",

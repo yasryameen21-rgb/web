@@ -1,4 +1,6 @@
-import "dotenv/config";
+import fs from "node:fs";
+import path from "node:path";
+import dotenv from "dotenv";
 import express from "express";
 import { createServer } from "http";
 import net from "net";
@@ -6,7 +8,27 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
-import { serveStatic, setupVite } from "./vite";
+import { serveStatic } from "./static";
+
+function loadEnvironmentFiles() {
+  const projectRoot = process.cwd();
+  const envMode = process.env.NODE_ENV || "development";
+  const candidates = [
+    `.env.${envMode}.local`,
+    `.env.${envMode}`,
+    ".env.local",
+    ".env",
+  ];
+
+  for (const fileName of candidates) {
+    const filePath = path.join(projectRoot, fileName);
+    if (fs.existsSync(filePath)) {
+      dotenv.config({ path: filePath, override: false });
+    }
+  }
+}
+
+loadEnvironmentFiles();
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -43,8 +65,9 @@ async function startServer() {
       createContext,
     })
   );
-  // development mode uses Vite, production mode uses static files
+  // development mode loads Vite lazily so production bundling doesn't pull Vite's native CSS toolchain
   if (process.env.NODE_ENV === "development") {
+    const { setupVite } = await import("./vite");
     await setupVite(app, server);
   } else {
     serveStatic(app);

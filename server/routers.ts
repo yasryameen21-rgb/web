@@ -117,7 +117,12 @@ function buildUserDirectory(users: BackendUser[], currentUserId?: string | null)
     }));
 }
 
-function buildPostCards(posts: BackendPost[], users: BackendUser[], currentUserId?: string | null) {
+function buildPostCards(
+  posts: BackendPost[],
+  users: BackendUser[],
+  currentUserId?: string | null,
+  currentProfile?: { user_id: string; display_name: string; contact?: string | null } | null
+) {
   const userMap = new Map(users.map(user => [user.id, user]));
 
   return posts.map(post => {
@@ -130,11 +135,17 @@ function buildPostCards(posts: BackendPost[], users: BackendUser[], currentUserI
       currentUserId && Object.values(post.reactions ?? {}).some(reactionUsers => reactionUsers.includes(currentUserId))
     );
 
+    const isCurrentProfileAuthor = currentProfile?.user_id === post.user_id;
+    const fallbackAuthor = isCurrentProfileAuthor ? currentProfile.display_name : "مستخدم";
+    const fallbackHandle = isCurrentProfileAuthor && currentProfile.contact?.includes("@")
+      ? `@${currentProfile.contact.split("@")[0]}`
+      : `@${post.user_id.slice(0, 8)}`;
+
     return {
       id: post.id,
-      author: author?.name ?? "مستخدم",
+      author: author?.name ?? fallbackAuthor,
       authorId: post.user_id,
-      handle: author?.email ? `@${author.email.split("@")[0]}` : `@${post.user_id.slice(0, 8)}`,
+      handle: author?.email ? `@${author.email.split("@")[0]}` : fallbackHandle,
       text: post.content,
       time: formatRelativeArabicDate(post.created_at),
       likes: likeCount,
@@ -374,7 +385,7 @@ export const appRouter = router({
         apiRequest<BackendUser[]>("/api/users?limit=50", { method: "GET" }),
       ]);
 
-      return buildPostCards(posts, users, session.profile?.user_id);
+      return buildPostCards(posts, users, session.profile?.user_id, session.profile);
     }),
     create: publicProcedure.input(createPostInput).mutation(async ({ input, ctx }) => {
       const session = getApiSession(ctx.req);
@@ -390,7 +401,19 @@ export const appRouter = router({
         }),
       });
 
-      return buildPostCards([created], [await fetchCurrentUser(session.accessToken!)], session.profile?.user_id)[0];
+      let currentUser: BackendUser | null = null;
+      try {
+        currentUser = await fetchCurrentUser(session.accessToken!);
+      } catch {
+        currentUser = null;
+      }
+
+      return buildPostCards(
+        [created],
+        currentUser ? [currentUser] : [],
+        session.profile?.user_id,
+        session.profile
+      )[0];
     }),
     react: publicProcedure.input(reactToPostInput).mutation(async ({ input, ctx }) => {
       const session = getApiSession(ctx.req);
@@ -461,7 +484,17 @@ export const appRouter = router({
         accessToken: session.accessToken,
       }).then((snapshot: any) => (Array.isArray(snapshot.groups) ? snapshot.groups : []));
 
-      return buildGroupCards(groups, new Set(joinedGroups.map((group: BackendGroup) => group.id || group.groupId)));
+      return buildGroupCards(
+        groups,
+        new Set(
+          joinedGroups
+            .map((group: BackendGroup | Record<string, unknown>) => {
+              const groupRecord = group as BackendGroup & { groupId?: string };
+              return groupRecord.id || groupRecord.groupId;
+            })
+            .filter((groupId: string | undefined): groupId is string => Boolean(groupId))
+        )
+      );
     }),
     toggleMembership: publicProcedure.input(groupMembershipInput).mutation(async ({ input, ctx }) => {
       const session = getApiSession(ctx.req);
