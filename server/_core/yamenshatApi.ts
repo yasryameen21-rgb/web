@@ -194,12 +194,16 @@ export class BackendApiError extends Error {
   }
 }
 
+const PRODUCTION_API_BASE_URL = "https://yamen-yasry-backend.onrender.com";
+
 function getApiBaseUrl() {
-  const baseUrl =
+  const configuredBaseUrl =
     process.env.YAMENSHAT_API_BASE_URL ??
     process.env.VITE_API_BASE_URL ??
-    "http://127.0.0.1:8000";
+    process.env.API_BASE_URL ??
+    "";
 
+  const baseUrl = configuredBaseUrl.trim() || PRODUCTION_API_BASE_URL;
   return baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
 }
 
