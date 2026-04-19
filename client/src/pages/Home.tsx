@@ -143,7 +143,7 @@ export default function Home() {
                 className="h-12 w-full text-base font-semibold"
               >
                 <Download className="h-4 w-4" />
-                Download App
+                تنزيل التطبيق
               </Button>
 
               <div className="rounded-xl bg-secondary/40 px-4 py-3 text-right text-sm text-muted-foreground">
