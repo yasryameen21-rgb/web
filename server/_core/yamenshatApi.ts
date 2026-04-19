@@ -72,6 +72,8 @@ export type BackendComment = {
   id: string;
   post_id: string;
   user_id: string;
+  user_name?: string | null;
+  user_profile_image?: string | null;
   content: string;
   reactions?: Record<string, string[]>;
   created_at: string;
@@ -194,16 +196,12 @@ export class BackendApiError extends Error {
   }
 }
 
-const PRODUCTION_API_BASE_URL = "https://yamen-yasry-backend.onrender.com";
-
 function getApiBaseUrl() {
-  const configuredBaseUrl =
+  const baseUrl =
     process.env.YAMENSHAT_API_BASE_URL ??
     process.env.VITE_API_BASE_URL ??
-    process.env.API_BASE_URL ??
-    "";
+    "http://127.0.0.1:8000";
 
-  const baseUrl = configuredBaseUrl.trim() || PRODUCTION_API_BASE_URL;
   return baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
 }
 

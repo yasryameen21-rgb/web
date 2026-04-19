@@ -16,6 +16,27 @@ function createPublicContext(): TrpcContext {
   };
 }
 
+function validCreatePayload(overrides: Partial<{
+  firstName: string;
+  lastName: string;
+  dateOfBirth?: Date;
+  contactMethod: "phone" | "email";
+  contact: string;
+  password: string;
+  verificationCode: string;
+}> = {}) {
+  return {
+    firstName: "محمد",
+    lastName: "أحمد",
+    dateOfBirth: new Date("1990-01-01"),
+    contactMethod: "phone" as const,
+    contact: "966501234567",
+    password: "Passw0rd!",
+    verificationCode: "123456",
+    ...overrides,
+  };
+}
+
 describe("users.create", () => {
   beforeEach(() => {
     vi.spyOn(global, "fetch").mockResolvedValue({
@@ -45,17 +66,12 @@ describe("users.create", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
+
   it("should create a user with valid input", async () => {
     const ctx = createPublicContext();
     const caller = appRouter.createCaller(ctx);
 
-    const result = await caller.users.create({
-      firstName: "محمد",
-      lastName: "أحمد",
-      dateOfBirth: new Date("1990-01-01"),
-      contactMethod: "phone",
-      contact: "966501234567",
-    });
+    const result = await caller.users.create(validCreatePayload());
 
     expect(result).toHaveProperty("success", true);
     expect(result).toHaveProperty("userId", "user-1");
@@ -67,67 +83,42 @@ describe("users.create", () => {
     const ctx = createPublicContext();
     const caller = appRouter.createCaller(ctx);
 
-    try {
-      await caller.users.create({
-        firstName: "",
-        lastName: "أحمد",
-        dateOfBirth: new Date("1990-01-01"),
-        contactMethod: "phone",
-        contact: "966501234567",
-      });
-      expect.fail("Should have thrown an error");
-    } catch (error) {
-      expect(error).toBeDefined();
-    }
+    await expect(
+      caller.users.create(validCreatePayload({ firstName: "" }))
+    ).rejects.toBeDefined();
   });
 
   it("should fail with empty lastName", async () => {
     const ctx = createPublicContext();
     const caller = appRouter.createCaller(ctx);
 
-    try {
-      await caller.users.create({
-        firstName: "محمد",
-        lastName: "",
-        dateOfBirth: new Date("1990-01-01"),
-        contactMethod: "phone",
-        contact: "966501234567",
-      });
-      expect.fail("Should have thrown an error");
-    } catch (error) {
-      expect(error).toBeDefined();
-    }
+    await expect(
+      caller.users.create(validCreatePayload({ lastName: "" }))
+    ).rejects.toBeDefined();
   });
 
   it("should fail with empty contact", async () => {
     const ctx = createPublicContext();
     const caller = appRouter.createCaller(ctx);
 
-    try {
-      await caller.users.create({
-        firstName: "محمد",
-        lastName: "أحمد",
-        dateOfBirth: new Date("1990-01-01"),
-        contactMethod: "phone",
-        contact: "",
-      });
-      expect.fail("Should have thrown an error");
-    } catch (error) {
-      expect(error).toBeDefined();
-    }
+    await expect(
+      caller.users.create(validCreatePayload({ contact: "" }))
+    ).rejects.toBeDefined();
   });
 
   it("should accept email as contact method", async () => {
     const ctx = createPublicContext();
     const caller = appRouter.createCaller(ctx);
 
-    const result = await caller.users.create({
-      firstName: "فاطمة",
-      lastName: "علي",
-      dateOfBirth: new Date("1995-05-15"),
-      contactMethod: "email",
-      contact: "fatima@example.com",
-    });
+    const result = await caller.users.create(
+      validCreatePayload({
+        firstName: "فاطمة",
+        lastName: "علي",
+        dateOfBirth: new Date("1995-05-15"),
+        contactMethod: "email",
+        contact: "fatima@example.com",
+      })
+    );
 
     expect(result).toHaveProperty("success", true);
     expect(result).toHaveProperty("userId");
@@ -137,12 +128,14 @@ describe("users.create", () => {
     const ctx = createPublicContext();
     const caller = appRouter.createCaller(ctx);
 
-    const result = await caller.users.create({
+    const payload = validCreatePayload({
       firstName: "سارة",
       lastName: "محمد",
-      contactMethod: "phone",
       contact: "966551234567",
     });
+    delete payload.dateOfBirth;
+
+    const result = await caller.users.create(payload);
 
     expect(result).toHaveProperty("success", true);
     expect(result).toHaveProperty("userId");

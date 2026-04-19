@@ -264,7 +264,7 @@ function buildCommentCards(comments: BackendComment[], users: BackendUser[], cur
       id: comment.id,
       postId: comment.post_id,
       authorId: comment.user_id,
-      author: userMap.get(comment.user_id) ?? "مستخدم",
+      author: comment.user_name ?? userMap.get(comment.user_id) ?? "مستخدم",
       text: comment.content,
       mine: comment.user_id === currentUserId,
       time: formatRelativeArabicDate(comment.created_at),
