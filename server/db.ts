@@ -1,13 +1,22 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
+import { int, mysqlEnum, mysqlTable, timestamp, varchar } from "drizzle-orm/mysql-core";
 import {
   InsertUser,
   users,
   userProfiles,
   InsertUserProfile,
-  passwordRecoveries,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
+
+const passwordRecoveriesTable = mysqlTable("passwordRecoveries", {
+  id: int("id").autoincrement().primaryKey(),
+  contactMethod: mysqlEnum("contactMethod", ["phone", "email"]).notNull(),
+  contact: varchar("contact", { length: 255 }).notNull(),
+  temporaryPassword: varchar("temporaryPassword", { length: 255 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
 
 let _db: ReturnType<typeof drizzle> | null = null;
 let passwordRecoveryTableReady = false;
@@ -173,26 +182,26 @@ export async function saveTemporaryRecoveryPassword(args: {
   try {
     const existing = await db
       .select()
-      .from(passwordRecoveries)
+      .from(passwordRecoveriesTable)
       .where(
         and(
-          eq(passwordRecoveries.contactMethod, args.contactMethod),
-          eq(passwordRecoveries.contact, normalizedContact)
+          eq(passwordRecoveriesTable.contactMethod, args.contactMethod),
+          eq(passwordRecoveriesTable.contact, normalizedContact)
         )
       )
-      .orderBy(desc(passwordRecoveries.updatedAt))
+      .orderBy(desc(passwordRecoveriesTable.updatedAt))
       .limit(1);
 
     if (existing.length > 0) {
       await db
-        .update(passwordRecoveries)
+        .update(passwordRecoveriesTable)
         .set({
           temporaryPassword: args.temporaryPassword,
           updatedAt: new Date(),
         })
-        .where(eq(passwordRecoveries.id, existing[0].id));
+        .where(eq(passwordRecoveriesTable.id, existing[0].id));
     } else {
-      await db.insert(passwordRecoveries).values({
+      await db.insert(passwordRecoveriesTable).values({
         contactMethod: args.contactMethod,
         contact: normalizedContact,
         temporaryPassword: args.temporaryPassword,
@@ -216,14 +225,14 @@ export async function getTemporaryRecoveryPassword(contactMethod: "phone" | "ema
   try {
     const rows = await db
       .select()
-      .from(passwordRecoveries)
+      .from(passwordRecoveriesTable)
       .where(
         and(
-          eq(passwordRecoveries.contactMethod, contactMethod),
-          eq(passwordRecoveries.contact, contact.trim().toLowerCase())
+          eq(passwordRecoveriesTable.contactMethod, contactMethod),
+          eq(passwordRecoveriesTable.contact, contact.trim().toLowerCase())
         )
       )
-      .orderBy(desc(passwordRecoveries.updatedAt))
+      .orderBy(desc(passwordRecoveriesTable.updatedAt))
       .limit(1);
 
     return rows[0]?.temporaryPassword ?? null;
