@@ -72,7 +72,7 @@ export default function Welcome() {
                   مرحباً، {user.name || "المستخدم"}
                 </p>
                 <p className="text-sm text-muted-foreground mt-1">
-                  {user.email || "لم يتم تعيين بريد إلكتروني"}
+                  بيانات التواصل مخفية حفاظاً على الخصوصية
                 </p>
               </div>
             )}

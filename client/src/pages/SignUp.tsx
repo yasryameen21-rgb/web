@@ -1,17 +1,33 @@
-import { useState, type ChangeEvent, type FormEvent } from "react";
+import { useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { ArrowRight, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
+import {
+  DEFAULT_ARAB_COUNTRY,
+  arabCountries,
+  buildFullPhoneNumber,
+  findArabCountry,
+  stripPhoneDigits,
+} from "@/lib/arabCountries";
 
 const DEFAULT_BIRTH_DATE = "2008-04-03";
 const MIN_BIRTH_DATE = "1950-01-01";
 
 export default function SignUp() {
   const [, setLocation] = useLocation();
+  const phoneInputRef = useRef<HTMLInputElement | null>(null);
+  const [selectedCountryCode, setSelectedCountryCode] = useState(DEFAULT_ARAB_COUNTRY.code);
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
@@ -24,12 +40,13 @@ export default function SignUp() {
 
   const createUserMutation = trpc.users.create.useMutation();
   const sendOtpMutation = trpc.auth.sendOtp.useMutation();
+  const selectedCountry = findArabCountry(selectedCountryCode);
 
   const handleInputChange = (e: ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({
       ...prev,
-      [name]: value,
+      [name]: name === "contact" && prev.contactMethod === "phone" ? stripPhoneDigits(value) : value,
     }));
   };
 
@@ -42,8 +59,25 @@ export default function SignUp() {
     }));
   };
 
+  const handleCountryChange = (countryCode: string) => {
+    setSelectedCountryCode(countryCode);
+    window.requestAnimationFrame(() => {
+      phoneInputRef.current?.focus();
+    });
+  };
+
+  const getResolvedContact = () => {
+    if (formData.contactMethod === "phone") {
+      return buildFullPhoneNumber(selectedCountry.dialCode, formData.contact);
+    }
+
+    return formData.contact.trim().toLowerCase();
+  };
+
   const validateContact = () => {
-    if (!formData.contact.trim()) {
+    const resolvedContact = getResolvedContact();
+
+    if (!resolvedContact) {
       toast.error(
         `يرجى إدخال ${formData.contactMethod === "phone" ? "رقم الجوال" : "البريد الإلكتروني"}`
       );
@@ -52,7 +86,7 @@ export default function SignUp() {
 
     if (
       formData.contactMethod === "email" &&
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.contact.trim())
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resolvedContact)
     ) {
       toast.error("يرجى إدخال بريد إلكتروني صحيح");
       return false;
@@ -67,7 +101,7 @@ export default function SignUp() {
     try {
       await sendOtpMutation.mutateAsync({
         contactMethod: formData.contactMethod,
-        contact: formData.contact.trim(),
+        contact: getResolvedContact(),
       });
       toast.success("تم إرسال رمز التحقق، أدخله لإكمال إنشاء الحساب");
     } catch (error) {
@@ -108,7 +142,7 @@ export default function SignUp() {
         lastName: formData.lastName.trim(),
         dateOfBirth: new Date(formData.dateOfBirth),
         contactMethod: formData.contactMethod,
-        contact: formData.contact.trim(),
+        contact: getResolvedContact(),
         password: formData.password,
         verificationCode: formData.verificationCode.trim(),
       });
@@ -212,22 +246,58 @@ export default function SignUp() {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">
-                  {formData.contactMethod === "phone" ? "رقم الجوال *" : "البريد الإلكتروني *"}
-                </label>
-                <Input
-                  type={formData.contactMethod === "phone" ? "tel" : "email"}
-                  name="contact"
-                  placeholder={
-                    formData.contactMethod === "phone" ? "أدخل رقم الجوال" : "أدخل بريدك الإلكتروني"
-                  }
-                  value={formData.contact}
-                  onChange={handleInputChange}
-                  className="h-11 text-base"
-                  required
-                />
-              </div>
+              {formData.contactMethod === "phone" ? (
+                <div className="space-y-3">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground">الدولة</label>
+                    <Select value={selectedCountryCode} onValueChange={handleCountryChange}>
+                      <SelectTrigger className="h-11 text-base">
+                        <SelectValue placeholder="اختر الدولة" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {arabCountries.map(country => (
+                          <SelectItem key={country.code} value={country.code}>
+                            {country.name} (+{country.dialCode})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground">رقم الجوال المحلي *</label>
+                    <div className="flex gap-2">
+                      <div className="flex h-11 min-w-24 items-center justify-center rounded-md border border-input bg-muted px-3 text-sm font-semibold text-muted-foreground">
+                        +{selectedCountry.dialCode}
+                      </div>
+                      <Input
+                        ref={phoneInputRef}
+                        type="tel"
+                        name="contact"
+                        inputMode="numeric"
+                        placeholder="اكتب الرقم بدون مفتاح الدولة"
+                        value={formData.contact}
+                        onChange={handleInputChange}
+                        className="h-11 text-base"
+                        required
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">البريد الإلكتروني *</label>
+                  <Input
+                    type="email"
+                    name="contact"
+                    placeholder="أدخل بريدك الإلكتروني"
+                    value={formData.contact}
+                    onChange={handleInputChange}
+                    className="h-11 text-base"
+                    required
+                  />
+                </div>
+              )}
 
               <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">إنشاء كلمة المرور *</label>
@@ -266,7 +336,7 @@ export default function SignUp() {
                   />
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  لازم ترسل الرمز وتدخله قبل إنشاء الحساب، والويب لن يقبل التسجيل بدونه.
+                  في حالة التسجيل بالجوال اختر الدولة واكتب الرقم المحلي فقط، وسيتم إضافة المقدمة تلقائياً قبل إرسال رمز التحقق والتسجيل.
                 </p>
               </div>
 
