@@ -56002,6 +56002,14 @@ var userProfiles = mysqlTable("userProfiles", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull()
 });
+var passwordRecoveries = mysqlTable("passwordRecoveries", {
+  id: int("id").autoincrement().primaryKey(),
+  contactMethod: mysqlEnum("contactMethod", ["phone", "email"]).notNull(),
+  contact: varchar("contact", { length: 255 }).notNull(),
+  temporaryPassword: varchar("temporaryPassword", { length: 255 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull()
+});
 
 // server/_core/env.ts
 var ENV = {
@@ -56017,6 +56025,7 @@ var ENV = {
 
 // server/db.ts
 var _db = null;
+var passwordRecoveryTableReady = false;
 async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
@@ -56027,6 +56036,27 @@ async function getDb() {
     }
   }
   return _db;
+}
+async function ensurePasswordRecoveriesTable() {
+  const db = await getDb();
+  if (!db) {
+    return null;
+  }
+  if (!passwordRecoveryTableReady) {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS passwordRecoveries (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        contactMethod ENUM('phone', 'email') NOT NULL,
+        contact VARCHAR(255) NOT NULL,
+        temporaryPassword VARCHAR(255) NOT NULL,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX passwordRecoveries_contact_idx (contactMethod, contact)
+      )
+    `);
+    passwordRecoveryTableReady = true;
+  }
+  return db;
 }
 async function upsertUser(user) {
   if (!user.openId) {
@@ -56085,6 +56115,57 @@ async function getUserByOpenId(openId) {
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
   return result.length > 0 ? result[0] : void 0;
 }
+async function saveTemporaryRecoveryPassword(args) {
+  const db = await ensurePasswordRecoveriesTable();
+  if (!db) {
+    console.warn("[Database] Cannot save password recovery: database not available");
+    return null;
+  }
+  const normalizedContact = args.contact.trim().toLowerCase();
+  try {
+    const existing = await db.select().from(passwordRecoveries).where(
+      and(
+        eq(passwordRecoveries.contactMethod, args.contactMethod),
+        eq(passwordRecoveries.contact, normalizedContact)
+      )
+    ).orderBy(desc(passwordRecoveries.updatedAt)).limit(1);
+    if (existing.length > 0) {
+      await db.update(passwordRecoveries).set({
+        temporaryPassword: args.temporaryPassword,
+        updatedAt: /* @__PURE__ */ new Date()
+      }).where(eq(passwordRecoveries.id, existing[0].id));
+    } else {
+      await db.insert(passwordRecoveries).values({
+        contactMethod: args.contactMethod,
+        contact: normalizedContact,
+        temporaryPassword: args.temporaryPassword
+      });
+    }
+    return args.temporaryPassword;
+  } catch (error48) {
+    console.error("[Database] Failed to save password recovery:", error48);
+    throw error48;
+  }
+}
+async function getTemporaryRecoveryPassword(contactMethod, contact) {
+  const db = await ensurePasswordRecoveriesTable();
+  if (!db) {
+    console.warn("[Database] Cannot get password recovery: database not available");
+    return null;
+  }
+  try {
+    const rows = await db.select().from(passwordRecoveries).where(
+      and(
+        eq(passwordRecoveries.contactMethod, contactMethod),
+        eq(passwordRecoveries.contact, contact.trim().toLowerCase())
+      )
+    ).orderBy(desc(passwordRecoveries.updatedAt)).limit(1);
+    return rows[0]?.temporaryPassword ?? null;
+  } catch (error48) {
+    console.error("[Database] Failed to get password recovery:", error48);
+    throw error48;
+  }
+}
 
 // server/_core/cookies.ts
 function isSecureRequest(req) {
@@ -56095,11 +56176,12 @@ function isSecureRequest(req) {
   return protoList.some((proto) => proto.trim().toLowerCase() === "https");
 }
 function getSessionCookieOptions(req) {
+  const secure = isSecureRequest(req);
   return {
     httpOnly: true,
     path: "/",
-    sameSite: "none",
-    secure: isSecureRequest(req)
+    sameSite: secure ? "none" : "lax",
+    secure
   };
 }
 
@@ -75458,7 +75540,7 @@ var BackendApiError = class extends Error {
   }
 };
 function getApiBaseUrl() {
-  const baseUrl = process.env.YAMENSHAT_API_BASE_URL ?? process.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
+  const baseUrl = process.env.YAMENSHAT_API_BASE_URL ?? process.env.VITE_API_BASE_URL ?? "https://yamen-yasry-backend.onrender.com";
   return baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
 }
 function wait(ms) {
@@ -75735,6 +75817,57 @@ var systemRouter = router({
   })
 });
 
+// server/storage.ts
+function getStorageConfig() {
+  const baseUrl = ENV.forgeApiUrl;
+  const apiKey = ENV.forgeApiKey;
+  if (!baseUrl || !apiKey) {
+    throw new Error(
+      "Storage proxy credentials missing: set BUILT_IN_FORGE_API_URL and BUILT_IN_FORGE_API_KEY"
+    );
+  }
+  return { baseUrl: baseUrl.replace(/\/+$/, ""), apiKey };
+}
+function buildUploadUrl(baseUrl, relKey) {
+  const url3 = new URL("v1/storage/upload", ensureTrailingSlash(baseUrl));
+  url3.searchParams.set("path", normalizeKey(relKey));
+  return url3;
+}
+function ensureTrailingSlash(value) {
+  return value.endsWith("/") ? value : `${value}/`;
+}
+function normalizeKey(relKey) {
+  return relKey.replace(/^\/+/, "");
+}
+function toFormData3(data, contentType, fileName) {
+  const blob = typeof data === "string" ? new Blob([data], { type: contentType }) : new Blob([data], { type: contentType });
+  const form = new FormData();
+  form.append("file", blob, fileName || "file");
+  return form;
+}
+function buildAuthHeaders(apiKey) {
+  return { Authorization: `Bearer ${apiKey}` };
+}
+async function storagePut(relKey, data, contentType = "application/octet-stream") {
+  const { baseUrl, apiKey } = getStorageConfig();
+  const key = normalizeKey(relKey);
+  const uploadUrl = buildUploadUrl(baseUrl, key);
+  const formData = toFormData3(data, contentType, key.split("/").pop() ?? key);
+  const response = await fetch(uploadUrl, {
+    method: "POST",
+    headers: buildAuthHeaders(apiKey),
+    body: formData
+  });
+  if (!response.ok) {
+    const message2 = await response.text().catch(() => response.statusText);
+    throw new Error(
+      `Storage upload failed (${response.status} ${response.statusText}): ${message2}`
+    );
+  }
+  const url3 = (await response.json()).url;
+  return { key, url: url3 };
+}
+
 // server/routers.ts
 var createUserInput = external_exports.object({
   firstName: external_exports.string().min(1, "\u0627\u0644\u0627\u0633\u0645 \u0627\u0644\u0623\u0648\u0644 \u0645\u0637\u0644\u0648\u0628"),
@@ -75752,6 +75885,15 @@ var loginInput = external_exports.object({
 var sendOtpInput = external_exports.object({
   contactMethod: external_exports.enum(["phone", "email"]),
   contact: external_exports.string().min(1, "\u062C\u0647\u0629 \u0627\u0644\u0627\u062A\u0635\u0627\u0644 \u0645\u0637\u0644\u0648\u0628\u0629")
+});
+var forgotPasswordInput = external_exports.object({
+  contactMethod: external_exports.enum(["phone", "email"]),
+  contact: external_exports.string().min(1, "\u062C\u0647\u0629 \u0627\u0644\u0627\u062A\u0635\u0627\u0644 \u0645\u0637\u0644\u0648\u0628\u0629")
+});
+var forgotPasswordVerifyInput = external_exports.object({
+  contactMethod: external_exports.enum(["phone", "email"]),
+  contact: external_exports.string().min(1, "\u062C\u0647\u0629 \u0627\u0644\u0627\u062A\u0635\u0627\u0644 \u0645\u0637\u0644\u0648\u0628\u0629"),
+  verificationCode: external_exports.string().min(4, "\u0631\u0645\u0632 \u0627\u0644\u062A\u062D\u0642\u0642 \u0645\u0637\u0644\u0648\u0628")
 });
 var createPostInput = external_exports.object({
   content: external_exports.string().min(1, "\u0645\u062D\u062A\u0648\u0649 \u0627\u0644\u0645\u0646\u0634\u0648\u0631 \u0645\u0637\u0644\u0648\u0628"),
@@ -75798,6 +75940,12 @@ var storyCreateInput = external_exports.object({
   mediaUrl: external_exports.string().url("\u062D\u0637 \u0631\u0627\u0628\u0637 \u0648\u0633\u0627\u0626\u0637 \u0635\u0627\u0644\u062D"),
   mediaType: external_exports.enum(["image", "video"]).default("image")
 });
+var mediaUploadInput = external_exports.object({
+  folder: external_exports.string().min(1).default("stories"),
+  fileName: external_exports.string().min(1, "\u0627\u0633\u0645 \u0627\u0644\u0645\u0644\u0641 \u0645\u0637\u0644\u0648\u0628"),
+  contentType: external_exports.string().min(1, "\u0646\u0648\u0639 \u0627\u0644\u0645\u0644\u0641 \u0645\u0637\u0644\u0648\u0628"),
+  dataBase64: external_exports.string().min(1, "\u0645\u062D\u062A\u0648\u0649 \u0627\u0644\u0645\u0644\u0641 \u0645\u0637\u0644\u0648\u0628")
+});
 var viewStoryInput = external_exports.object({
   storyId: external_exports.string()
 });
@@ -75828,20 +75976,31 @@ function normalizeIdentifier(identifier) {
       contactMethod: "email"
     };
   }
-  const normalizedPhone = trimmed.replace(/\s+/g, "").replace(/-/g, "");
+  const normalizedPhone = trimmed.replace(/\D/g, "");
   return {
     loginEmail: `${normalizedPhone}@familyhub.local`,
     contact: normalizedPhone,
     contactMethod: "phone"
   };
 }
+function normalizeContactValue(contactMethod, contact) {
+  return contactMethod === "email" ? contact.trim().toLowerCase() : contact.trim().replace(/\D/g, "");
+}
+function generateTemporaryPassword(contact) {
+  const seed = contact.replace(/\W/g, "").slice(-4) || "USER";
+  const randomChunk = Math.random().toString(36).slice(2, 8).toUpperCase();
+  return `TEMP-${seed}-${randomChunk}`;
+}
+function buildSafeBio(user) {
+  return user?.bio?.trim() || "\u0639\u0636\u0648 \u0641\u064A \u064A\u0627\u0645\u0646 \u0634\u0627\u062A";
+}
 function buildUserDirectory(users2, currentUserId) {
   return users2.filter((user) => user.id !== currentUserId).slice(0, 30).map((user) => ({
     id: user.id,
     name: user.name,
-    bio: user.bio || user.email || user.phone_number || "\u0639\u0636\u0648 \u062C\u062F\u064A\u062F \u0641\u064A \u064A\u0627\u0645\u0646 \u0634\u0627\u062A",
-    email: user.email,
-    phoneNumber: user.phone_number ?? null,
+    bio: buildSafeBio(user),
+    email: null,
+    phoneNumber: null,
     following: false
   }));
 }
@@ -75863,7 +76022,7 @@ function buildPostCards(posts, users2, currentUserId, currentProfile) {
       id: post.id,
       author: author?.name ?? fallbackAuthor,
       authorId: post.user_id,
-      handle: author?.email ? `@${author.email.split("@")[0]}` : fallbackHandle,
+      handle: "\u0645\u0639\u0644\u0648\u0645\u0627\u062A \u0627\u0644\u062A\u0648\u0627\u0635\u0644 \u0645\u062E\u0641\u064A\u0629",
       text: post.content,
       time: formatRelativeArabicDate(post.created_at),
       likes: likeCount,
@@ -75875,16 +76034,26 @@ function buildPostCards(posts, users2, currentUserId, currentProfile) {
     };
   });
 }
-function buildMarketplaceCards(items) {
-  return items.map((item) => ({
-    id: item.id,
-    name: item.title,
-    price: `${item.price} ${item.currency}`,
-    store: item.category || "\u0627\u0644\u0633\u0648\u0642",
-    city: item.location || "\u063A\u064A\u0631 \u0645\u062D\u062F\u062F",
-    posted: formatRelativeArabicDate(item.created_at),
-    description: item.description
-  }));
+function buildMarketplaceCards(items, users2 = [], currentUserId) {
+  const userMap = new Map(users2.map((user) => [user.id, user]));
+  return items.map((item) => {
+    const seller = userMap.get(item.seller_id);
+    return {
+      id: item.id,
+      sellerId: item.seller_id,
+      sellerName: seller?.name ?? "\u0627\u0644\u0628\u0627\u0626\u0639",
+      sellerBio: buildSafeBio(seller),
+      canChat: item.seller_id !== currentUserId,
+      isMine: item.seller_id === currentUserId,
+      name: item.title,
+      price: `${item.price} ${item.currency}`,
+      store: item.category || "\u0627\u0644\u0633\u0648\u0642",
+      city: item.location || "\u063A\u064A\u0631 \u0645\u062D\u062F\u062F",
+      posted: formatRelativeArabicDate(item.created_at),
+      description: item.description,
+      imageUrls: item.image_urls ?? []
+    };
+  });
 }
 function buildGroupCards(groups, joinedIds = /* @__PURE__ */ new Set()) {
   return groups.slice(0, 12).map((group) => ({
@@ -75933,7 +76102,7 @@ function buildCommentCards(comments, users2, currentUserId) {
     id: comment.id,
     postId: comment.post_id,
     authorId: comment.user_id,
-    author: userMap.get(comment.user_id) ?? "\u0645\u0633\u062A\u062E\u062F\u0645",
+    author: comment.user_name ?? userMap.get(comment.user_id) ?? "\u0645\u0633\u062A\u062E\u062F\u0645",
     text: comment.content,
     mine: comment.user_id === currentUserId,
     time: formatRelativeArabicDate(comment.created_at)
@@ -75974,11 +76143,43 @@ var appRouter = router({
   system: systemRouter,
   auth: router({
     sendOtp: publicProcedure.input(sendOtpInput).mutation(async ({ input }) => {
-      const payload = input.contactMethod === "email" ? { email: input.contact.trim().toLowerCase() } : { phone_number: input.contact.trim().replace(/\s+/g, "").replace(/-/g, "") };
+      const payload = input.contactMethod === "email" ? { email: input.contact.trim().toLowerCase() } : { phone_number: input.contact.trim().replace(/\D/g, "") };
       return apiRequest("/api/auth/send-otp", {
         method: "POST",
         body: JSON.stringify(payload)
       });
+    }),
+    forgotPasswordSendCode: publicProcedure.input(forgotPasswordInput).mutation(async ({ input }) => {
+      const normalizedContact = normalizeContactValue(input.contactMethod, input.contact);
+      const payload = input.contactMethod === "email" ? { email: normalizedContact } : { phone_number: normalizedContact };
+      await apiRequest("/api/auth/send-otp", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+      const temporaryPassword = generateTemporaryPassword(normalizedContact);
+      await saveTemporaryRecoveryPassword({
+        contactMethod: input.contactMethod,
+        contact: normalizedContact,
+        temporaryPassword
+      });
+      return {
+        success: true,
+        message: "\u062A\u0645 \u0625\u0631\u0633\u0627\u0644 \u0631\u0645\u0632 \u0627\u0644\u062A\u062D\u0642\u0642 \u0648\u062D\u0641\u0638 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u0645\u0624\u0642\u062A\u0629"
+      };
+    }),
+    forgotPasswordVerify: publicProcedure.input(forgotPasswordVerifyInput).mutation(async ({ input }) => {
+      if (input.verificationCode.trim().length < 4) {
+        throw new Error("\u0631\u0645\u0632 \u0627\u0644\u062A\u062D\u0642\u0642 \u063A\u064A\u0631 \u0635\u0627\u0644\u062D");
+      }
+      const normalizedContact = normalizeContactValue(input.contactMethod, input.contact);
+      const temporaryPassword = await getTemporaryRecoveryPassword(input.contactMethod, normalizedContact);
+      if (!temporaryPassword) {
+        throw new Error("\u0644\u0627 \u062A\u0648\u062C\u062F \u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u0645\u0624\u0642\u062A\u0629 \u0645\u062D\u0641\u0648\u0638\u0629 \u0644\u0647\u0630\u0627 \u0627\u0644\u062D\u0633\u0627\u0628");
+      }
+      return {
+        success: true,
+        temporaryPassword
+      };
     }),
     login: publicProcedure.input(loginInput).mutation(async ({ input, ctx }) => {
       const normalized = normalizeIdentifier(input.identifier);
@@ -76084,7 +76285,7 @@ var appRouter = router({
       return friends.map((friend) => ({
         id: friend.id,
         name: friend.name,
-        bio: friend.bio || friend.email || friend.phone_number || "\u0635\u062F\u064A\u0642 \u062F\u0627\u062E\u0644 \u064A\u0627\u0645\u0646 \u0634\u0627\u062A"
+        bio: buildSafeBio(friend)
       }));
     }),
     addFriend: publicProcedure.input(friendInput).mutation(async ({ input, ctx }) => {
@@ -76169,29 +76370,36 @@ var appRouter = router({
     })
   }),
   market: router({
-    list: publicProcedure.query(async () => {
-      const items = await apiRequest("/api/marketplace?limit=12", {
-        method: "GET"
-      });
-      return buildMarketplaceCards(items);
+    list: publicProcedure.query(async ({ ctx }) => {
+      const session = getApiSession(ctx.req);
+      const [items, users2] = await Promise.all([
+        apiRequest("/api/marketplace?limit=12", {
+          method: "GET"
+        }),
+        apiRequest("/api/users?limit=50", { method: "GET" })
+      ]);
+      return buildMarketplaceCards(items, users2, session.profile?.user_id);
     }),
     create: publicProcedure.input(createMarketplaceInput).mutation(async ({ input, ctx }) => {
       const session = getApiSession(ctx.req);
       await requireApiAuth(session.accessToken);
-      const created = await apiRequest("/api/marketplace", {
-        method: "POST",
-        accessToken: session.accessToken,
-        body: JSON.stringify({
-          title: input.title,
-          description: input.description,
-          price: input.price,
-          currency: input.currency,
-          category: input.category,
-          location: input.location,
-          image_urls: input.imageUrls
-        })
-      });
-      return buildMarketplaceCards([created])[0];
+      const [created, users2] = await Promise.all([
+        apiRequest("/api/marketplace", {
+          method: "POST",
+          accessToken: session.accessToken,
+          body: JSON.stringify({
+            title: input.title,
+            description: input.description,
+            price: input.price,
+            currency: input.currency,
+            category: input.category,
+            location: input.location,
+            image_urls: input.imageUrls
+          })
+        }),
+        apiRequest("/api/users?limit=50", { method: "GET" })
+      ]);
+      return buildMarketplaceCards([created], users2, session.profile?.user_id)[0];
     })
   }),
   groups: router({
@@ -76341,6 +76549,24 @@ var appRouter = router({
         accessToken: session.accessToken
       });
       return { success: true };
+    })
+  }),
+  media: router({
+    upload: publicProcedure.input(mediaUploadInput).mutation(async ({ input }) => {
+      const normalizedFolder = input.folder.trim().replace(/^\/+|\/+$/g, "") || "stories";
+      const sanitizedFileName = input.fileName.trim().replace(/[^a-zA-Z0-9._-]/g, "_");
+      const rawBase64 = input.dataBase64.includes(",") ? input.dataBase64.split(",").pop() ?? input.dataBase64 : input.dataBase64;
+      const buffer = Buffer.from(rawBase64, "base64");
+      const uploaded = await storagePut(
+        `${normalizedFolder}/${Date.now()}-${sanitizedFileName}`,
+        buffer,
+        input.contentType
+      );
+      return {
+        success: true,
+        url: uploaded.url,
+        key: uploaded.key
+      };
     })
   }),
   live: router({
