@@ -200,7 +200,7 @@ function getApiBaseUrl() {
   const baseUrl =
     process.env.YAMENSHAT_API_BASE_URL ??
     process.env.VITE_API_BASE_URL ??
-    "http://127.0.0.1:8000";
+    "https://yamen-yasry-backend.onrender.com";
 
   return baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
 }

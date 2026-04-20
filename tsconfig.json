@@ -10,7 +10,7 @@
     "vitest.config.ts",
     "drizzle.config.ts"
   ],
-  "exclude": ["node_modules", "build", "dist", "**/*.test.ts", "client/src/pages/ComponentShowcase.tsx", "client/src/pages/page.tsx"],
+  "exclude": ["node_modules", "build", "dist", "**/*.test.ts", "client/src/pages/ComponentShowcase.tsx"],
   "compilerOptions": {
     "incremental": true,
     "tsBuildInfoFile": "./node_modules/typescript/tsbuildinfo",

@@ -21,6 +21,8 @@ import {
 } from "./_core/yamenshatApi";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
+import { getTemporaryRecoveryPassword, saveTemporaryRecoveryPassword } from "./db";
+import { storagePut } from "./storage";
 
 const createUserInput = z.object({
   firstName: z.string().min(1, "الاسم الأول مطلوب"),
@@ -40,6 +42,17 @@ const loginInput = z.object({
 const sendOtpInput = z.object({
   contactMethod: z.enum(["phone", "email"]),
   contact: z.string().min(1, "جهة الاتصال مطلوبة"),
+});
+
+const forgotPasswordInput = z.object({
+  contactMethod: z.enum(["phone", "email"]),
+  contact: z.string().min(1, "جهة الاتصال مطلوبة"),
+});
+
+const forgotPasswordVerifyInput = z.object({
+  contactMethod: z.enum(["phone", "email"]),
+  contact: z.string().min(1, "جهة الاتصال مطلوبة"),
+  verificationCode: z.string().min(4, "رمز التحقق مطلوب"),
 });
 
 const createPostInput = z.object({
@@ -96,6 +109,13 @@ const storyCreateInput = z.object({
   mediaType: z.enum(["image", "video"]).default("image"),
 });
 
+const mediaUploadInput = z.object({
+  folder: z.string().min(1).default("stories"),
+  fileName: z.string().min(1, "اسم الملف مطلوب"),
+  contentType: z.string().min(1, "نوع الملف مطلوب"),
+  dataBase64: z.string().min(1, "محتوى الملف مطلوب"),
+});
+
 const viewStoryInput = z.object({
   storyId: z.string(),
 });
@@ -134,12 +154,28 @@ function normalizeIdentifier(identifier: string) {
     };
   }
 
-  const normalizedPhone = trimmed.replace(/\s+/g, "").replace(/-/g, "");
+  const normalizedPhone = trimmed.replace(/\D/g, "");
   return {
     loginEmail: `${normalizedPhone}@familyhub.local`,
     contact: normalizedPhone,
     contactMethod: "phone" as const,
   };
+}
+
+function normalizeContactValue(contactMethod: "phone" | "email", contact: string) {
+  return contactMethod === "email"
+    ? contact.trim().toLowerCase()
+    : contact.trim().replace(/\D/g, "");
+}
+
+function generateTemporaryPassword(contact: string) {
+  const seed = contact.replace(/\W/g, "").slice(-4) || "USER";
+  const randomChunk = Math.random().toString(36).slice(2, 8).toUpperCase();
+  return `TEMP-${seed}-${randomChunk}`;
+}
+
+function buildSafeBio(user?: BackendUser | null) {
+  return user?.bio?.trim() || "عضو في يامن شات";
 }
 
 function buildUserDirectory(users: BackendUser[], currentUserId?: string | null) {
@@ -149,9 +185,9 @@ function buildUserDirectory(users: BackendUser[], currentUserId?: string | null)
     .map(user => ({
       id: user.id,
       name: user.name,
-      bio: user.bio || user.email || user.phone_number || "عضو جديد في يامن شات",
-      email: user.email,
-      phoneNumber: user.phone_number ?? null,
+      bio: buildSafeBio(user),
+      email: null,
+      phoneNumber: null,
       following: false,
     }));
 }
@@ -184,7 +220,7 @@ function buildPostCards(
       id: post.id,
       author: author?.name ?? fallbackAuthor,
       authorId: post.user_id,
-      handle: author?.email ? `@${author.email.split("@")[0]}` : fallbackHandle,
+      handle: "معلومات التواصل مخفية",
       text: post.content,
       time: formatRelativeArabicDate(post.created_at),
       likes: likeCount,
@@ -197,16 +233,32 @@ function buildPostCards(
   });
 }
 
-function buildMarketplaceCards(items: BackendMarketplaceItem[]) {
-  return items.map(item => ({
-    id: item.id,
-    name: item.title,
-    price: `${item.price} ${item.currency}`,
-    store: item.category || "السوق",
-    city: item.location || "غير محدد",
-    posted: formatRelativeArabicDate(item.created_at),
-    description: item.description,
-  }));
+function buildMarketplaceCards(
+  items: BackendMarketplaceItem[],
+  users: BackendUser[] = [],
+  currentUserId?: string | null
+) {
+  const userMap = new Map(users.map(user => [user.id, user]));
+
+  return items.map(item => {
+    const seller = userMap.get(item.seller_id);
+
+    return {
+      id: item.id,
+      sellerId: item.seller_id,
+      sellerName: seller?.name ?? "البائع",
+      sellerBio: buildSafeBio(seller),
+      canChat: item.seller_id !== currentUserId,
+      isMine: item.seller_id === currentUserId,
+      name: item.title,
+      price: `${item.price} ${item.currency}`,
+      store: item.category || "السوق",
+      city: item.location || "غير محدد",
+      posted: formatRelativeArabicDate(item.created_at),
+      description: item.description,
+      imageUrls: item.image_urls ?? [],
+    };
+  });
 }
 
 function buildGroupCards(groups: BackendGroup[], joinedIds = new Set<string>()) {
@@ -312,12 +364,53 @@ export const appRouter = router({
       const payload =
         input.contactMethod === "email"
           ? { email: input.contact.trim().toLowerCase() }
-          : { phone_number: input.contact.trim().replace(/\s+/g, "").replace(/-/g, "") };
+          : { phone_number: input.contact.trim().replace(/\D/g, "") };
 
       return apiRequest<{ success: boolean; message: string }>("/api/auth/send-otp", {
         method: "POST",
         body: JSON.stringify(payload),
       });
+    }),
+    forgotPasswordSendCode: publicProcedure.input(forgotPasswordInput).mutation(async ({ input }) => {
+      const normalizedContact = normalizeContactValue(input.contactMethod, input.contact);
+      const payload =
+        input.contactMethod === "email"
+          ? { email: normalizedContact }
+          : { phone_number: normalizedContact };
+
+      await apiRequest<{ success: boolean; message: string }>("/api/auth/send-otp", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+
+      const temporaryPassword = generateTemporaryPassword(normalizedContact);
+      await saveTemporaryRecoveryPassword({
+        contactMethod: input.contactMethod,
+        contact: normalizedContact,
+        temporaryPassword,
+      });
+
+      return {
+        success: true,
+        message: "تم إرسال رمز التحقق وحفظ كلمة المرور المؤقتة",
+      } as const;
+    }),
+    forgotPasswordVerify: publicProcedure.input(forgotPasswordVerifyInput).mutation(async ({ input }) => {
+      if (input.verificationCode.trim().length < 4) {
+        throw new Error("رمز التحقق غير صالح");
+      }
+
+      const normalizedContact = normalizeContactValue(input.contactMethod, input.contact);
+      const temporaryPassword = await getTemporaryRecoveryPassword(input.contactMethod, normalizedContact);
+
+      if (!temporaryPassword) {
+        throw new Error("لا توجد كلمة مرور مؤقتة محفوظة لهذا الحساب");
+      }
+
+      return {
+        success: true,
+        temporaryPassword,
+      } as const;
     }),
     login: publicProcedure.input(loginInput).mutation(async ({ input, ctx }) => {
       const normalized = normalizeIdentifier(input.identifier);
@@ -460,7 +553,7 @@ export const appRouter = router({
       return friends.map(friend => ({
         id: friend.id,
         name: friend.name,
-        bio: friend.bio || friend.email || friend.phone_number || "صديق داخل يامن شات",
+        bio: buildSafeBio(friend),
       }));
     }),
     addFriend: publicProcedure.input(friendInput).mutation(async ({ input, ctx }) => {
@@ -556,31 +649,38 @@ export const appRouter = router({
   }),
 
   market: router({
-    list: publicProcedure.query(async () => {
-      const items = await apiRequest<BackendMarketplaceItem[]>("/api/marketplace?limit=12", {
-        method: "GET",
-      });
-      return buildMarketplaceCards(items);
+    list: publicProcedure.query(async ({ ctx }) => {
+      const session = getApiSession(ctx.req);
+      const [items, users] = await Promise.all([
+        apiRequest<BackendMarketplaceItem[]>("/api/marketplace?limit=12", {
+          method: "GET",
+        }),
+        apiRequest<BackendUser[]>("/api/users?limit=50", { method: "GET" }),
+      ]);
+      return buildMarketplaceCards(items, users, session.profile?.user_id);
     }),
     create: publicProcedure.input(createMarketplaceInput).mutation(async ({ input, ctx }) => {
       const session = getApiSession(ctx.req);
       await requireApiAuth(session.accessToken);
 
-      const created = await apiRequest<BackendMarketplaceItem>("/api/marketplace", {
-        method: "POST",
-        accessToken: session.accessToken,
-        body: JSON.stringify({
-          title: input.title,
-          description: input.description,
-          price: input.price,
-          currency: input.currency,
-          category: input.category,
-          location: input.location,
-          image_urls: input.imageUrls,
+      const [created, users] = await Promise.all([
+        apiRequest<BackendMarketplaceItem>("/api/marketplace", {
+          method: "POST",
+          accessToken: session.accessToken,
+          body: JSON.stringify({
+            title: input.title,
+            description: input.description,
+            price: input.price,
+            currency: input.currency,
+            category: input.category,
+            location: input.location,
+            image_urls: input.imageUrls,
+          }),
         }),
-      });
+        apiRequest<BackendUser[]>("/api/users?limit=50", { method: "GET" }),
+      ]);
 
-      return buildMarketplaceCards([created])[0];
+      return buildMarketplaceCards([created], users, session.profile?.user_id)[0];
     }),
   }),
 
@@ -742,6 +842,28 @@ export const appRouter = router({
         accessToken: session.accessToken,
       });
       return { success: true };
+    }),
+  }),
+
+  media: router({
+    upload: publicProcedure.input(mediaUploadInput).mutation(async ({ input }) => {
+      const normalizedFolder = input.folder.trim().replace(/^\/+|\/+$/g, "") || "stories";
+      const sanitizedFileName = input.fileName.trim().replace(/[^a-zA-Z0-9._-]/g, "_");
+      const rawBase64 = input.dataBase64.includes(",")
+        ? input.dataBase64.split(",").pop() ?? input.dataBase64
+        : input.dataBase64;
+      const buffer = Buffer.from(rawBase64, "base64");
+      const uploaded = await storagePut(
+        `${normalizedFolder}/${Date.now()}-${sanitizedFileName}`,
+        buffer,
+        input.contentType
+      );
+
+      return {
+        success: true,
+        url: uploaded.url,
+        key: uploaded.key,
+      };
     }),
   }),
 

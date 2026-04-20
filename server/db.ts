@@ -1,9 +1,16 @@
-import { eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, userProfiles, InsertUserProfile } from "../drizzle/schema";
-import { ENV } from './_core/env';
+import {
+  InsertUser,
+  users,
+  userProfiles,
+  InsertUserProfile,
+  passwordRecoveries,
+} from "../drizzle/schema";
+import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
+let passwordRecoveryTableReady = false;
 
 // Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
@@ -16,6 +23,30 @@ export async function getDb() {
     }
   }
   return _db;
+}
+
+async function ensurePasswordRecoveriesTable() {
+  const db = await getDb();
+  if (!db) {
+    return null;
+  }
+
+  if (!passwordRecoveryTableReady) {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS passwordRecoveries (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        contactMethod ENUM('phone', 'email') NOT NULL,
+        contact VARCHAR(255) NOT NULL,
+        temporaryPassword VARCHAR(255) NOT NULL,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX passwordRecoveries_contact_idx (contactMethod, contact)
+      )
+    `);
+    passwordRecoveryTableReady = true;
+  }
+
+  return db;
 }
 
 export async function upsertUser(user: InsertUser): Promise<void> {
@@ -56,8 +87,8 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       values.role = user.role;
       updateSet.role = user.role;
     } else if (user.openId === ENV.ownerOpenId) {
-      values.role = 'admin';
-      updateSet.role = 'admin';
+      values.role = "admin";
+      updateSet.role = "admin";
     }
 
     if (!values.lastSignedIn) {
@@ -122,6 +153,82 @@ export async function getUserProfileByUserId(userId: number) {
     return result.length > 0 ? result[0] : undefined;
   } catch (error) {
     console.error("[Database] Failed to get user profile:", error);
+    throw error;
+  }
+}
+
+export async function saveTemporaryRecoveryPassword(args: {
+  contactMethod: "phone" | "email";
+  contact: string;
+  temporaryPassword: string;
+}) {
+  const db = await ensurePasswordRecoveriesTable();
+  if (!db) {
+    console.warn("[Database] Cannot save password recovery: database not available");
+    return null;
+  }
+
+  const normalizedContact = args.contact.trim().toLowerCase();
+
+  try {
+    const existing = await db
+      .select()
+      .from(passwordRecoveries)
+      .where(
+        and(
+          eq(passwordRecoveries.contactMethod, args.contactMethod),
+          eq(passwordRecoveries.contact, normalizedContact)
+        )
+      )
+      .orderBy(desc(passwordRecoveries.updatedAt))
+      .limit(1);
+
+    if (existing.length > 0) {
+      await db
+        .update(passwordRecoveries)
+        .set({
+          temporaryPassword: args.temporaryPassword,
+          updatedAt: new Date(),
+        })
+        .where(eq(passwordRecoveries.id, existing[0].id));
+    } else {
+      await db.insert(passwordRecoveries).values({
+        contactMethod: args.contactMethod,
+        contact: normalizedContact,
+        temporaryPassword: args.temporaryPassword,
+      });
+    }
+
+    return args.temporaryPassword;
+  } catch (error) {
+    console.error("[Database] Failed to save password recovery:", error);
+    throw error;
+  }
+}
+
+export async function getTemporaryRecoveryPassword(contactMethod: "phone" | "email", contact: string) {
+  const db = await ensurePasswordRecoveriesTable();
+  if (!db) {
+    console.warn("[Database] Cannot get password recovery: database not available");
+    return null;
+  }
+
+  try {
+    const rows = await db
+      .select()
+      .from(passwordRecoveries)
+      .where(
+        and(
+          eq(passwordRecoveries.contactMethod, contactMethod),
+          eq(passwordRecoveries.contact, contact.trim().toLowerCase())
+        )
+      )
+      .orderBy(desc(passwordRecoveries.updatedAt))
+      .limit(1);
+
+    return rows[0]?.temporaryPassword ?? null;
+  } catch (error) {
+    console.error("[Database] Failed to get password recovery:", error);
     throw error;
   }
 }
