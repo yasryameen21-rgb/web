@@ -21,7 +21,6 @@ import {
 } from "./_core/yamenshatApi";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
-import { getTemporaryRecoveryPassword, saveTemporaryRecoveryPassword } from "./db";
 import { storagePut } from "./storage";
 
 const createUserInput = z.object({
@@ -378,22 +377,10 @@ export const appRouter = router({
           ? { email: normalizedContact }
           : { phone_number: normalizedContact };
 
-      await apiRequest<{ success: boolean; message: string }>("/api/auth/send-otp", {
+      return apiRequest<{ success: boolean; message: string }>("/api/auth/send-otp", {
         method: "POST",
         body: JSON.stringify(payload),
       });
-
-      const temporaryPassword = generateTemporaryPassword(normalizedContact);
-      await saveTemporaryRecoveryPassword({
-        contactMethod: input.contactMethod,
-        contact: normalizedContact,
-        temporaryPassword,
-      });
-
-      return {
-        success: true,
-        message: "تم إرسال رمز التحقق وحفظ كلمة المرور المؤقتة",
-      } as const;
     }),
     forgotPasswordVerify: publicProcedure.input(forgotPasswordVerifyInput).mutation(async ({ input }) => {
       if (input.verificationCode.trim().length < 4) {
@@ -401,15 +388,23 @@ export const appRouter = router({
       }
 
       const normalizedContact = normalizeContactValue(input.contactMethod, input.contact);
-      const temporaryPassword = await getTemporaryRecoveryPassword(input.contactMethod, normalizedContact);
+      const payload =
+        input.contactMethod === "email"
+          ? { email: normalizedContact, verification_code: input.verificationCode.trim() }
+          : { phone_number: normalizedContact, verification_code: input.verificationCode.trim() };
 
-      if (!temporaryPassword) {
-        throw new Error("لا توجد كلمة مرور مؤقتة محفوظة لهذا الحساب");
+      const result = await apiRequest<{ success: boolean; temporary_password?: string; message: string }>("/api/auth/reset-password", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+
+      if (!result.temporary_password) {
+        throw new Error(result.message || "تعذر إنشاء كلمة مرور مؤقتة حالياً");
       }
 
       return {
         success: true,
-        temporaryPassword,
+        temporaryPassword: result.temporary_password,
       } as const;
     }),
     login: publicProcedure.input(loginInput).mutation(async ({ input, ctx }) => {

@@ -209,6 +209,37 @@ function wait(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function isTransientBackendStatus(status: number) {
+  return [502, 503, 504, 522, 524].includes(status);
+}
+
+function buildBackendFallbackMessage(status: number) {
+  if (isTransientBackendStatus(status)) {
+    return "الخادم مشغول حالياً أو ما زال يستيقظ. حاول مرة أخرى بعد ثوانٍ قليلة.";
+  }
+
+  return `Backend API request failed with status ${status}`;
+}
+
+async function warmUpBackend() {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+
+  try {
+    await fetch(`${getApiBaseUrl()}/api/health`, {
+      method: "GET",
+      headers: {
+        accept: "application/json",
+      },
+      signal: controller.signal,
+    });
+  } catch {
+    // Ignore wake-up errors. The main request will surface the final outcome.
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function parseCookies(req: Request) {
   return cookie.parse(req.headers.cookie ?? "");
 }
@@ -304,7 +335,7 @@ export async function apiRequest<T>(
     headers.set("authorization", `Bearer ${init.accessToken}`);
   }
 
-  const maxAttempts = 2;
+  const maxAttempts = 3;
   let lastError: unknown = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -326,11 +357,21 @@ export async function apiRequest<T>(
         : await response.text().catch(() => "");
 
       if (!response.ok) {
-        throw new BackendApiError(
-          extractErrorMessage(payload, `Backend API request failed with status ${response.status}`),
+        const backendError = new BackendApiError(
+          extractErrorMessage(payload, buildBackendFallbackMessage(response.status)),
           response.status,
           payload
         );
+
+        lastError = backendError;
+
+        if (isTransientBackendStatus(response.status) && attempt < maxAttempts) {
+          await warmUpBackend();
+          await wait(1200 * attempt);
+          continue;
+        }
+
+        throw backendError;
       }
 
       return payload as T;
@@ -340,11 +381,13 @@ export async function apiRequest<T>(
 
       const isAbortError = error instanceof Error && error.name === "AbortError";
       const isNetworkError = error instanceof TypeError || isAbortError;
+      const isRetryableBackendError = error instanceof BackendApiError && isTransientBackendStatus(error.status);
 
-      if (!isNetworkError || attempt === maxAttempts) {
+      if ((!isNetworkError && !isRetryableBackendError) || attempt === maxAttempts) {
         break;
       }
 
+      await warmUpBackend();
       await wait(800 * attempt);
     }
   }

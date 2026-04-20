@@ -1,4 +1,12 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, date } from "drizzle-orm/mysql-core";
+import {
+  int,
+  mysqlEnum,
+  mysqlTable,
+  text,
+  timestamp,
+  varchar,
+  date,
+} from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -41,5 +49,16 @@ export const userProfiles = mysqlTable("userProfiles", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+export const passwordRecoveries = mysqlTable("passwordRecoveries", {
+  id: int("id").autoincrement().primaryKey(),
+  contactMethod: mysqlEnum("contactMethod", ["phone", "email"]).notNull(),
+  contact: varchar("contact", { length: 255 }).notNull(),
+  temporaryPassword: varchar("temporaryPassword", { length: 255 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
 export type UserProfile = typeof userProfiles.$inferSelect;
 export type InsertUserProfile = typeof userProfiles.$inferInsert;
+export type PasswordRecovery = typeof passwordRecoveries.$inferSelect;
+export type InsertPasswordRecovery = typeof passwordRecoveries.$inferInsert;
