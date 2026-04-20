@@ -17,7 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Copy, Download, LockKeyhole, Smartphone } from "lucide-react";
+import { Copy, Download, LockKeyhole, Mail, Smartphone } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import {
@@ -37,6 +37,7 @@ export default function Home() {
   const phoneInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedCountryCode, setSelectedCountryCode] = useState(DEFAULT_ARAB_COUNTRY.code);
   const [localPhone, setLocalPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [forgotPasswordOpen, setForgotPasswordOpen] = useState(false);
   const [recoveryCode, setRecoveryCode] = useState("");
@@ -50,6 +51,27 @@ export default function Home() {
   const isDownloadReady = useMemo(() => /^https?:\/\//.test(APP_DOWNLOAD_URL), []);
   const selectedCountry = findArabCountry(selectedCountryCode);
   const normalizedPhone = buildFullPhoneNumber(selectedCountry.dialCode, localPhone);
+  const normalizedEmail = email.trim().toLowerCase();
+
+  const resolvePreferredIdentifier = () => {
+    if (normalizedPhone) {
+      return {
+        identifier: normalizedPhone,
+        contactMethod: "phone" as const,
+      };
+    }
+
+    if (normalizedEmail) {
+      return {
+        identifier: normalizedEmail,
+        contactMethod: "email" as const,
+      };
+    }
+
+    return null;
+  };
+
+  const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
   useEffect(() => {
     if (currentUser) {
@@ -71,14 +93,21 @@ export default function Home() {
   const handleLogin = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    if (!normalizedPhone || !password.trim()) {
-      toast.error("اختر الدولة واكتب الرقم المحلي وكلمة المرور أولاً");
+    const resolvedIdentifier = resolvePreferredIdentifier();
+
+    if (!resolvedIdentifier || !password.trim()) {
+      toast.error("اكتب رقم الجوال أو البريد الإلكتروني ثم كلمة المرور أولاً");
+      return;
+    }
+
+    if (resolvedIdentifier.contactMethod === "email" && !isValidEmail(resolvedIdentifier.identifier)) {
+      toast.error("يرجى إدخال بريد إلكتروني صحيح");
       return;
     }
 
     try {
       await loginMutation.mutateAsync({
-        identifier: normalizedPhone,
+        identifier: resolvedIdentifier.identifier,
         password,
       });
       toast.success("تم تسجيل الدخول بنجاح");
@@ -98,6 +127,18 @@ export default function Home() {
   };
 
   const handleOpenForgotPassword = () => {
+    const resolvedIdentifier = resolvePreferredIdentifier();
+
+    if (!resolvedIdentifier) {
+      toast.error("اكتب رقم الجوال أو البريد الإلكتروني أولاً ثم جرّب الاسترجاع");
+      return;
+    }
+
+    if (resolvedIdentifier.contactMethod === "email" && !isValidEmail(resolvedIdentifier.identifier)) {
+      toast.error("يرجى إدخال بريد إلكتروني صحيح أولاً");
+      return;
+    }
+
     setForgotPasswordOpen(true);
     setRecoveryCode("");
     setTemporaryPassword("");
@@ -105,18 +146,25 @@ export default function Home() {
   };
 
   const handleSendRecoveryCode = async () => {
-    if (!normalizedPhone) {
-      toast.error("اختر الدولة واكتب رقم الجوال المحلي أولاً");
+    const resolvedIdentifier = resolvePreferredIdentifier();
+
+    if (!resolvedIdentifier) {
+      toast.error("اكتب رقم الجوال أو البريد الإلكتروني أولاً");
+      return;
+    }
+
+    if (resolvedIdentifier.contactMethod === "email" && !isValidEmail(resolvedIdentifier.identifier)) {
+      toast.error("يرجى إدخال بريد إلكتروني صحيح");
       return;
     }
 
     try {
       await forgotPasswordSendCodeMutation.mutateAsync({
-        contactMethod: "phone",
-        contact: normalizedPhone,
+        contactMethod: resolvedIdentifier.contactMethod,
+        contact: resolvedIdentifier.identifier,
       });
       setRecoveryStep("otp-sent");
-      toast.success("تم إرسال رمز التحقق وتجهيز كلمة المرور المؤقتة في قاعدة البيانات");
+      toast.success("تم إرسال رمز التحقق. أدخل الكود للحصول على كلمة مرور مؤقتة جديدة");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "تعذر إرسال رمز التحقق");
     }
@@ -128,15 +176,22 @@ export default function Home() {
       return;
     }
 
+    const resolvedIdentifier = resolvePreferredIdentifier();
+
+    if (!resolvedIdentifier) {
+      toast.error("اكتب رقم الجوال أو البريد الإلكتروني أولاً");
+      return;
+    }
+
     try {
       const result = await forgotPasswordVerifyMutation.mutateAsync({
-        contactMethod: "phone",
-        contact: normalizedPhone,
+        contactMethod: resolvedIdentifier.contactMethod,
+        contact: resolvedIdentifier.identifier,
         verificationCode: recoveryCode.trim(),
       });
       setTemporaryPassword(result.temporaryPassword);
       setRecoveryStep("verified");
-      toast.success("تم جلب كلمة المرور المؤقتة من قاعدة البيانات");
+      toast.success("تم إنشاء كلمة مرور مؤقتة جديدة بنجاح");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "تعذر التحقق من الرمز حالياً");
     }
@@ -167,7 +222,7 @@ export default function Home() {
               <div className="floating-text">
                 <h1 className="text-5xl font-bold gradient-text sm:text-6xl">يامن شات</h1>
               </div>
-              <p className="text-lg text-muted-foreground">تسجيل دخول مخصص للدول العربية برقم الجوال المحلي</p>
+              <p className="text-lg text-muted-foreground">تسجيل الدخول متاح برقم الجوال المحلي أو البريد الإلكتروني</p>
               <div className="mt-6 flex justify-center">
                 <img
                   src="/home-child-security-realistic.png"
@@ -210,7 +265,22 @@ export default function Home() {
                       value={localPhone}
                       onChange={(e) => handlePhoneChange(e.target.value)}
                       className="h-12 text-base"
-                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">البريد الإلكتروني</label>
+                  <div className="relative">
+                    <Mail className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      type="email"
+                      autoComplete="email"
+                      dir="ltr"
+                      placeholder="name@example.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="h-12 pr-10 text-base"
                     />
                   </div>
                 </div>
@@ -242,7 +312,7 @@ export default function Home() {
                 </div>
 
                 <div className="rounded-xl bg-secondary/30 px-4 py-3 text-right text-sm text-muted-foreground">
-                  اختر الدولة مرة واحدة، وبعدها هيتم نقل التركيز مباشرة إلى خانة الرقم المحلي وتكتب الرقم بدون المقدمة الدولية.
+                  اكتب رقم الجوال أو البريد الإلكتروني. لو الاتنين موجودين، النظام هيحاول تسجيل الدخول برقم الجوال أولاً، ولو الرقم فاضي هيستخدم البريد الإلكتروني.
                 </div>
 
                 <Button
@@ -281,7 +351,7 @@ export default function Home() {
                     دعم جميع الدول العربية
                   </div>
                   <p>
-                    القائمة مقتصرة على الدول العربية فقط، والرقم الظاهر في الإدخال هو الرقم المحلي بدون أي prefix.
+                    القائمة مقتصرة على الدول العربية فقط، والرقم الظاهر في الإدخال هو الرقم المحلي بدون أي prefix، ويمكنك أيضاً تسجيل الدخول بالبريد الإلكتروني من الحقل الجديد.
                   </p>
                 </div>
               </div>
@@ -295,13 +365,18 @@ export default function Home() {
           <DialogHeader>
             <DialogTitle>استرجاع كلمة المرور</DialogTitle>
             <DialogDescription>
-              سيتم إرسال رمز تحقق إلى رقم الجوال الحالي، وبعد إدخاله سنجلب كلمة المرور المؤقتة المحفوظة في قاعدة البيانات لتكون قابلة للنسخ.
+              سيتم إرسال رمز تحقق إلى وسيلة التواصل المكتوبة حالياً، سواء رقم الجوال أو البريد الإلكتروني، وبعد إدخاله سنجلب كلمة المرور المؤقتة المحفوظة في قاعدة البيانات لتكون قابلة للنسخ.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
             <div className="rounded-2xl border border-border/70 bg-muted/30 p-4 text-sm leading-7 text-muted-foreground">
-              رقم الاسترجاع الحالي: <span className="font-semibold text-foreground">+{selectedCountry.dialCode} {localPhone || "—"}</span>
+              وسيلة الاسترجاع الحالية:{" "}
+              <span className="font-semibold text-foreground">
+                {resolvePreferredIdentifier()?.contactMethod === "phone"
+                  ? `+${selectedCountry.dialCode} ${localPhone || "—"}`
+                  : normalizedEmail || "—"}
+              </span>
             </div>
 
             <Button
