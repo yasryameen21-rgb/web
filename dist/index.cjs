@@ -56024,6 +56024,14 @@ var ENV = {
 };
 
 // server/db.ts
+var passwordRecoveriesTable = mysqlTable("passwordRecoveries", {
+  id: int("id").autoincrement().primaryKey(),
+  contactMethod: mysqlEnum("contactMethod", ["phone", "email"]).notNull(),
+  contact: varchar("contact", { length: 255 }).notNull(),
+  temporaryPassword: varchar("temporaryPassword", { length: 255 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull()
+});
 var _db = null;
 var passwordRecoveryTableReady = false;
 async function getDb() {
@@ -56123,19 +56131,19 @@ async function saveTemporaryRecoveryPassword(args) {
   }
   const normalizedContact = args.contact.trim().toLowerCase();
   try {
-    const existing = await db.select().from(passwordRecoveries).where(
+    const existing = await db.select().from(passwordRecoveriesTable).where(
       and(
-        eq(passwordRecoveries.contactMethod, args.contactMethod),
-        eq(passwordRecoveries.contact, normalizedContact)
+        eq(passwordRecoveriesTable.contactMethod, args.contactMethod),
+        eq(passwordRecoveriesTable.contact, normalizedContact)
       )
-    ).orderBy(desc(passwordRecoveries.updatedAt)).limit(1);
+    ).orderBy(desc(passwordRecoveriesTable.updatedAt)).limit(1);
     if (existing.length > 0) {
-      await db.update(passwordRecoveries).set({
+      await db.update(passwordRecoveriesTable).set({
         temporaryPassword: args.temporaryPassword,
         updatedAt: /* @__PURE__ */ new Date()
-      }).where(eq(passwordRecoveries.id, existing[0].id));
+      }).where(eq(passwordRecoveriesTable.id, existing[0].id));
     } else {
-      await db.insert(passwordRecoveries).values({
+      await db.insert(passwordRecoveriesTable).values({
         contactMethod: args.contactMethod,
         contact: normalizedContact,
         temporaryPassword: args.temporaryPassword
@@ -56154,12 +56162,12 @@ async function getTemporaryRecoveryPassword(contactMethod, contact) {
     return null;
   }
   try {
-    const rows = await db.select().from(passwordRecoveries).where(
+    const rows = await db.select().from(passwordRecoveriesTable).where(
       and(
-        eq(passwordRecoveries.contactMethod, contactMethod),
-        eq(passwordRecoveries.contact, contact.trim().toLowerCase())
+        eq(passwordRecoveriesTable.contactMethod, contactMethod),
+        eq(passwordRecoveriesTable.contact, contact.trim().toLowerCase())
       )
-    ).orderBy(desc(passwordRecoveries.updatedAt)).limit(1);
+    ).orderBy(desc(passwordRecoveriesTable.updatedAt)).limit(1);
     return rows[0]?.temporaryPassword ?? null;
   } catch (error48) {
     console.error("[Database] Failed to get password recovery:", error48);
@@ -75546,6 +75554,31 @@ function getApiBaseUrl() {
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+function isTransientBackendStatus(status) {
+  return [502, 503, 504, 522, 524].includes(status);
+}
+function buildBackendFallbackMessage(status) {
+  if (isTransientBackendStatus(status)) {
+    return "\u0627\u0644\u062E\u0627\u062F\u0645 \u0645\u0634\u063A\u0648\u0644 \u062D\u0627\u0644\u064A\u0627\u064B \u0623\u0648 \u0645\u0627 \u0632\u0627\u0644 \u064A\u0633\u062A\u064A\u0642\u0638. \u062D\u0627\u0648\u0644 \u0645\u0631\u0629 \u0623\u062E\u0631\u0649 \u0628\u0639\u062F \u062B\u0648\u0627\u0646\u064D \u0642\u0644\u064A\u0644\u0629.";
+  }
+  return `Backend API request failed with status ${status}`;
+}
+async function warmUpBackend() {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1e4);
+  try {
+    await fetch(`${getApiBaseUrl()}/api/health`, {
+      method: "GET",
+      headers: {
+        accept: "application/json"
+      },
+      signal: controller.signal
+    });
+  } catch {
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 function parseCookies(req) {
   return import_cookie2.default.parse(req.headers.cookie ?? "");
 }
@@ -75620,7 +75653,7 @@ async function apiRequest(path3, init = {}) {
   if (init.accessToken) {
     headers.set("authorization", `Bearer ${init.accessToken}`);
   }
-  const maxAttempts = 2;
+  const maxAttempts = 3;
   let lastError = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const controller = new AbortController();
@@ -75635,11 +75668,18 @@ async function apiRequest(path3, init = {}) {
       const contentType = response.headers.get("content-type") ?? "";
       const payload = contentType.includes("application/json") ? await response.json().catch(() => null) : await response.text().catch(() => "");
       if (!response.ok) {
-        throw new BackendApiError(
-          extractErrorMessage(payload, `Backend API request failed with status ${response.status}`),
+        const backendError = new BackendApiError(
+          extractErrorMessage(payload, buildBackendFallbackMessage(response.status)),
           response.status,
           payload
         );
+        lastError = backendError;
+        if (isTransientBackendStatus(response.status) && attempt < maxAttempts) {
+          await warmUpBackend();
+          await wait(1200 * attempt);
+          continue;
+        }
+        throw backendError;
       }
       return payload;
     } catch (error48) {
@@ -75647,9 +75687,11 @@ async function apiRequest(path3, init = {}) {
       lastError = error48;
       const isAbortError2 = error48 instanceof Error && error48.name === "AbortError";
       const isNetworkError = error48 instanceof TypeError || isAbortError2;
-      if (!isNetworkError || attempt === maxAttempts) {
+      const isRetryableBackendError = error48 instanceof BackendApiError && isTransientBackendStatus(error48.status);
+      if (!isNetworkError && !isRetryableBackendError || attempt === maxAttempts) {
         break;
       }
+      await warmUpBackend();
       await wait(800 * attempt);
     }
   }
