@@ -54,6 +54,13 @@ const forgotPasswordVerifyInput = z.object({
   verificationCode: z.string().min(4, "رمز التحقق مطلوب"),
 });
 
+const forgotPasswordCompleteInput = z.object({
+  contactMethod: z.enum(["phone", "email"]),
+  contact: z.string().min(1, "جهة الاتصال مطلوبة"),
+  verificationCode: z.string().min(4, "رمز التحقق مطلوب"),
+  newPassword: z.string().min(8, "كلمة المرور الجديدة لازم تكون 8 أحرف على الأقل"),
+});
+
 const createPostInput = z.object({
   content: z.string().min(1, "محتوى المنشور مطلوب"),
   postType: z.enum(["text", "image", "video", "document"]).default("text"),
@@ -393,19 +400,41 @@ export const appRouter = router({
           ? { email: normalizedContact, verification_code: input.verificationCode.trim() }
           : { phone_number: normalizedContact, verification_code: input.verificationCode.trim() };
 
-      const result = await apiRequest<{ success: boolean; temporary_password?: string; message: string }>("/api/auth/reset-password", {
+      const result = await apiRequest<{ success: boolean; password_updated?: boolean; message: string }>("/api/auth/reset-password", {
         method: "POST",
         body: JSON.stringify(payload),
       });
 
-      if (!result.temporary_password) {
-        throw new Error(result.message || "تعذر إنشاء كلمة مرور مؤقتة حالياً");
+      return {
+        success: result.success,
+        message: result.message,
+      } as const;
+    }),
+    forgotPasswordComplete: publicProcedure.input(forgotPasswordCompleteInput).mutation(async ({ input }) => {
+      const normalizedContact = normalizeContactValue(input.contactMethod, input.contact);
+      const payload =
+        input.contactMethod === "email"
+          ? {
+              email: normalizedContact,
+              verification_code: input.verificationCode.trim(),
+              new_password: input.newPassword,
+            }
+          : {
+              phone_number: normalizedContact,
+              verification_code: input.verificationCode.trim(),
+              new_password: input.newPassword,
+            };
+
+      const result = await apiRequest<{ success: boolean; password_updated?: boolean; message: string }>("/api/auth/reset-password", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+
+      if (!result.success || !result.password_updated) {
+        throw new Error(result.message || "تعذر حفظ كلمة المرور الجديدة حالياً");
       }
 
-      return {
-        success: true,
-        temporaryPassword: result.temporary_password,
-      } as const;
+      return { success: true, message: result.message } as const;
     }),
     login: publicProcedure.input(loginInput).mutation(async ({ input, ctx }) => {
       const normalized = normalizeIdentifier(input.identifier);
@@ -847,6 +876,19 @@ export const appRouter = router({
       const rawBase64 = input.dataBase64.includes(",")
         ? input.dataBase64.split(",").pop() ?? input.dataBase64
         : input.dataBase64;
+
+      const hasStorageProxy = Boolean(
+        process.env.BUILT_IN_FORGE_API_URL?.trim() && process.env.BUILT_IN_FORGE_API_KEY?.trim()
+      );
+
+      if (!hasStorageProxy) {
+        return {
+          success: true,
+          url: `data:${input.contentType};base64,${rawBase64}`,
+          key: `${normalizedFolder}/inline-${Date.now()}-${sanitizedFileName}`,
+        };
+      }
+
       const buffer = Buffer.from(rawBase64, "base64");
       const uploaded = await storagePut(
         `${normalizedFolder}/${Date.now()}-${sanitizedFileName}`,
