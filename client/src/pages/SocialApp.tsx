@@ -56,7 +56,7 @@ const bottomNavItems: { key: AppTab; label: string; icon: typeof Home }[] = [
 
 const allNavItems = [...topNavItems, ...bottomNavItems];
 
-const panelClass = "rounded-2xl border border-border/80 bg-card/95 shadow-lg backdrop-blur";
+const panelClass = "rounded-2xl border border-sky-300/25 bg-slate-900/88 shadow-lg shadow-sky-950/30 backdrop-blur";
 const cardHeaderClass = "px-4 py-4 sm:px-6 sm:py-5";
 
 const normalizeLookup = (value?: string | null) =>
@@ -74,7 +74,7 @@ export default function SocialApp() {
   const [commentsOpen, setCommentsOpen] = useState<Record<string, boolean>>({});
   const [commentsByPost, setCommentsByPost] = useState<Record<string, any[]>>({});
   const [commentsLoading, setCommentsLoading] = useState<Record<string, boolean>>({});
-  const [marketForm, setMarketForm] = useState({ name: "", price: "", city: "", category: "other" });
+  const [marketForm, setMarketForm] = useState({ name: "", price: "", city: "", category: "other", description: "" });
   const [storyForm, setStoryForm] = useState({ mediaUrl: "", mediaType: "image" as "image" | "video" });
   const [storyUploadState, setStoryUploadState] = useState<"idle" | "reading" | "uploading" | "publishing">("idle");
   const [storyFileData, setStoryFileData] = useState<null | {
@@ -86,6 +86,14 @@ export default function SocialApp() {
   const [storyPreviewUrl, setStoryPreviewUrl] = useState("");
   const storyLibraryInputRef = useRef<HTMLInputElement | null>(null);
   const storyCameraInputRef = useRef<HTMLInputElement | null>(null);
+  const marketImageInputRef = useRef<HTMLInputElement | null>(null);
+  const [marketUploadState, setMarketUploadState] = useState<"idle" | "reading" | "uploading">("idle");
+  const [marketFileData, setMarketFileData] = useState<null | {
+    fileName: string;
+    contentType: string;
+    dataBase64: string;
+  }>(null);
+  const [marketPreviewUrl, setMarketPreviewUrl] = useState("");
   const [liveTitle, setLiveTitle] = useState("");
   const [chatMessage, setChatMessage] = useState("");
   const [chatSearch, setChatSearch] = useState("");
@@ -404,6 +412,47 @@ export default function SocialApp() {
     setStoryUploadState("idle");
   };
 
+  const handleMarketFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("اختر صورة فقط للمنتج");
+      return;
+    }
+
+    try {
+      setMarketUploadState("reading");
+      const dataBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result ?? ""));
+        reader.onerror = () => reject(new Error("تعذر قراءة صورة المنتج"));
+        reader.readAsDataURL(file);
+      });
+
+      setMarketFileData({
+        fileName: file.name,
+        contentType: file.type || "image/jpeg",
+        dataBase64,
+      });
+      setMarketPreviewUrl(URL.createObjectURL(file));
+      toast.success("تم تجهيز صورة المنتج");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر تجهيز صورة المنتج");
+      setMarketFileData(null);
+      setMarketPreviewUrl("");
+    } finally {
+      setMarketUploadState("idle");
+    }
+  };
+
+  const clearMarketDraft = () => {
+    setMarketFileData(null);
+    setMarketPreviewUrl("");
+    setMarketUploadState("idle");
+  };
+
   const handleCreateStory = async () => {
     if (!storyFileData || storyUploadState !== "idle") return;
 
@@ -511,20 +560,36 @@ export default function SocialApp() {
     }
 
     try {
+      let imageUrls: string[] = [];
+
+      if (marketFileData) {
+        setMarketUploadState("uploading");
+        const uploaded = await uploadStoryMutation.mutateAsync({
+          folder: "marketplace",
+          fileName: marketFileData.fileName,
+          contentType: marketFileData.contentType,
+          dataBase64: marketFileData.dataBase64,
+        });
+        imageUrls = [uploaded.url];
+      }
+
       await createMarketMutation.mutateAsync({
         title: marketForm.name,
-        description: `منتج منشور من ${currentUser?.name ?? "المستخدم"}`,
+        description: marketForm.description.trim() || `منتج منشور من ${currentUser?.name ?? "المستخدم"}`,
         price: numericPrice,
         currency: "EGP",
         category: marketForm.category,
         location: marketForm.city || null,
-        imageUrls: [],
+        imageUrls,
       });
-      setMarketForm({ name: "", price: "", city: "", category: "other" });
+      setMarketForm({ name: "", price: "", city: "", category: "other", description: "" });
+      clearMarketDraft();
       toast.success("تم نشر المنتج");
       await utils.market.list.invalidate();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "تعذر نشر المنتج");
+    } finally {
+      setMarketUploadState("idle");
     }
   };
 
@@ -1041,15 +1106,54 @@ export default function SocialApp() {
       <Card className={panelClass}>
         <CardHeader className={cardHeaderClass}>
           <CardTitle className="text-lg sm:text-xl">نشر منتج جديد</CardTitle>
-          <CardDescription>السوق متصل مباشرة بالـ API.</CardDescription>
+          <CardDescription>أضف تفاصيل الصنف وارفع صورة قبل النشر مباشرة.</CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-3 px-4 pb-4 pt-0 md:grid-cols-2 sm:px-6 sm:pb-6 xl:grid-cols-4">
-          <Input value={marketForm.name} onChange={(e) => setMarketForm(current => ({ ...current, name: e.target.value }))} placeholder="اسم المنتج" />
-          <Input value={marketForm.price} onChange={(e) => setMarketForm(current => ({ ...current, price: e.target.value }))} placeholder="السعر" />
-          <Input value={marketForm.city} onChange={(e) => setMarketForm(current => ({ ...current, city: e.target.value }))} placeholder="المدينة" />
-          <Button onClick={handleCreateMarketItem} disabled={!marketForm.name || !marketForm.price || createMarketMutation.isPending}>
-            نشر المنتج
-          </Button>
+        <CardContent className="space-y-4 px-4 pb-4 pt-0 sm:px-6 sm:pb-6">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <Input value={marketForm.name} onChange={(e) => setMarketForm(current => ({ ...current, name: e.target.value }))} placeholder="اسم المنتج" />
+            <Input value={marketForm.price} onChange={(e) => setMarketForm(current => ({ ...current, price: e.target.value }))} placeholder="السعر" />
+            <Input value={marketForm.city} onChange={(e) => setMarketForm(current => ({ ...current, city: e.target.value }))} placeholder="المدينة" />
+            <Button onClick={handleCreateMarketItem} disabled={!marketForm.name || !marketForm.price || createMarketMutation.isPending || marketUploadState === "uploading"}>
+              {createMarketMutation.isPending || marketUploadState === "uploading" ? "جارٍ نشر المنتج..." : "نشر المنتج"}
+            </Button>
+          </div>
+
+          <Textarea
+            value={marketForm.description}
+            onChange={(e) => setMarketForm(current => ({ ...current, description: e.target.value }))}
+            placeholder="وصف المنتج والمواصفات والحالة"
+            className="min-h-28"
+          />
+
+          <input
+            ref={marketImageInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleMarketFileChange}
+          />
+
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" onClick={() => marketImageInputRef.current?.click()}>
+              <ImagePlus className="w-4 h-4" />
+              رفع صورة المنتج
+            </Button>
+            <Button type="button" variant="ghost" onClick={clearMarketDraft} disabled={!marketFileData && !marketPreviewUrl}>
+              إزالة الصورة
+            </Button>
+          </div>
+
+          <div className="rounded-2xl border border-sky-300/20 bg-sky-400/10 px-4 py-3 text-sm text-sky-50/90">
+            {marketUploadState === "reading" && "جارٍ قراءة صورة المنتج..."}
+            {marketUploadState === "uploading" && "جارٍ رفع صورة المنتج..."}
+            {marketUploadState === "idle" && (marketFileData ? `الصورة الجاهزة: ${marketFileData.fileName}` : "أضف صورة ليظهر زر الرفع ومعاينة الصنف بوضوح.")}
+          </div>
+
+          {marketPreviewUrl && (
+            <div className="overflow-hidden rounded-2xl border border-sky-300/20 bg-background/40 p-3">
+              <img src={marketPreviewUrl} alt="معاينة المنتج" className="max-h-72 w-full rounded-xl object-contain" />
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -1067,6 +1171,11 @@ export default function SocialApp() {
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
+              {product.imageUrls?.[0] && (
+                <div className="overflow-hidden rounded-2xl border border-sky-300/20 bg-background/40 p-2">
+                  <img src={product.imageUrls[0]} alt={product.name} className="max-h-56 w-full rounded-xl object-cover" />
+                </div>
+              )}
               <div className="rounded-2xl border border-border/70 bg-background/40 p-3">
                 <p className="font-semibold">{product.sellerName}</p>
                 <p className="mt-1 text-sm text-muted-foreground">{product.sellerBio}</p>
@@ -1203,8 +1312,8 @@ export default function SocialApp() {
   );
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white">
-      <header className="fixed inset-x-0 top-0 z-40 border-b border-border/80 bg-black/92 backdrop-blur">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.14),_transparent_28%),linear-gradient(180deg,#07101d_0%,#050814_100%)] text-white">
+      <header className="fixed inset-x-0 top-0 z-40 border-b border-sky-300/20 bg-slate-950/88 backdrop-blur">
         <div className="mx-auto flex max-w-7xl flex-col gap-3 px-3 py-3 sm:px-4 sm:py-4">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
@@ -1226,7 +1335,7 @@ export default function SocialApp() {
                   key={item.key}
                   size="sm"
                   variant={isActive ? "default" : "outline"}
-                  className="justify-center text-xs sm:text-sm"
+                  className={`justify-center text-xs sm:text-sm ${isActive ? "border-sky-300/40 bg-sky-400/20 text-white shadow-sm shadow-sky-500/20" : "border-sky-300/15 bg-slate-900/45 text-sky-50 hover:bg-sky-500/10"}`}
                   onClick={() => setActiveTab(item.key)}
                 >
                   <Icon className="h-4 w-4" />
@@ -1261,7 +1370,7 @@ export default function SocialApp() {
         {activeTab === "settings" && renderSettings()}
       </main>
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border/80 bg-black/95 px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 backdrop-blur">
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-sky-300/20 bg-slate-950/92 px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 backdrop-blur">
         <div className="mx-auto grid max-w-4xl grid-cols-5 gap-2">
           {bottomNavItems.map(item => {
             const Icon = item.icon;
@@ -1272,7 +1381,7 @@ export default function SocialApp() {
                 key={item.key}
                 size="sm"
                 variant={isActive ? "default" : "ghost"}
-                className="h-auto flex-col gap-1 rounded-xl px-2 py-2 text-[11px] sm:text-xs"
+                className={`h-auto flex-col gap-1 rounded-xl px-2 py-2 text-[11px] sm:text-xs ${isActive ? "border-sky-300/40 bg-sky-400/20 text-white shadow-sm shadow-sky-500/20" : "text-sky-50/85 hover:bg-sky-500/10"}`}
                 onClick={() => setActiveTab(item.key)}
               >
                 <Icon className="h-4 w-4" />

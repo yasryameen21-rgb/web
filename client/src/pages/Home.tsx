@@ -41,13 +41,15 @@ export default function Home() {
   const [password, setPassword] = useState("");
   const [forgotPasswordOpen, setForgotPasswordOpen] = useState(false);
   const [recoveryCode, setRecoveryCode] = useState("");
-  const [temporaryPassword, setTemporaryPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
   const [recoveryStep, setRecoveryStep] = useState<"idle" | "otp-sent" | "verified">("idle");
 
   const { data: currentUser, isLoading: isUserLoading } = trpc.auth.me.useQuery();
   const loginMutation = trpc.auth.login.useMutation();
   const forgotPasswordSendCodeMutation = trpc.auth.forgotPasswordSendCode.useMutation();
   const forgotPasswordVerifyMutation = trpc.auth.forgotPasswordVerify.useMutation();
+  const forgotPasswordCompleteMutation = trpc.auth.forgotPasswordComplete.useMutation();
   const isDownloadReady = useMemo(() => /^https?:\/\//.test(APP_DOWNLOAD_URL), []);
   const selectedCountry = findArabCountry(selectedCountryCode);
   const normalizedPhone = buildFullPhoneNumber(selectedCountry.dialCode, localPhone);
@@ -141,7 +143,8 @@ export default function Home() {
 
     setForgotPasswordOpen(true);
     setRecoveryCode("");
-    setTemporaryPassword("");
+    setNewPassword("");
+    setConfirmNewPassword("");
     setRecoveryStep("idle");
   };
 
@@ -164,7 +167,7 @@ export default function Home() {
         contact: resolvedIdentifier.identifier,
       });
       setRecoveryStep("otp-sent");
-      toast.success("تم إرسال رمز التحقق. أدخل الكود للحصول على كلمة مرور مؤقتة جديدة");
+      toast.success("تم إرسال رمز التحقق. أدخل الكود ثم أنشئ كلمة مرور جديدة");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "تعذر إرسال رمز التحقق");
     }
@@ -184,27 +187,58 @@ export default function Home() {
     }
 
     try {
-      const result = await forgotPasswordVerifyMutation.mutateAsync({
+      await forgotPasswordVerifyMutation.mutateAsync({
         contactMethod: resolvedIdentifier.contactMethod,
         contact: resolvedIdentifier.identifier,
         verificationCode: recoveryCode.trim(),
       });
-      setTemporaryPassword(result.temporaryPassword);
       setRecoveryStep("verified");
-      toast.success("تم إنشاء كلمة مرور مؤقتة جديدة بنجاح");
+      toast.success("تم التحقق من الرمز. اكتب كلمة المرور الجديدة الآن");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "تعذر التحقق من الرمز حالياً");
     }
   };
 
-  const handleCopyPassword = async () => {
-    if (!temporaryPassword) return;
+  const handleCompletePasswordReset = async () => {
+    const resolvedIdentifier = resolvePreferredIdentifier();
+
+    if (!resolvedIdentifier) {
+      toast.error("اكتب رقم الجوال أو البريد الإلكتروني أولاً");
+      return;
+    }
+
+    if (recoveryCode.trim().length < 4) {
+      toast.error("أدخل رمز التحقق أولاً");
+      return;
+    }
+
+    if (newPassword.trim().length < 8) {
+      toast.error("كلمة المرور الجديدة لازم تكون 8 أحرف على الأقل");
+      return;
+    }
+
+    if (newPassword !== confirmNewPassword) {
+      toast.error("تأكيد كلمة المرور غير متطابق");
+      return;
+    }
 
     try {
-      await navigator.clipboard.writeText(temporaryPassword);
-      toast.success("تم نسخ كلمة المرور المؤقتة");
-    } catch {
-      toast.error("تعذر النسخ تلقائياً");
+      await forgotPasswordCompleteMutation.mutateAsync({
+        contactMethod: resolvedIdentifier.contactMethod,
+        contact: resolvedIdentifier.identifier,
+        verificationCode: recoveryCode.trim(),
+        newPassword,
+      });
+      toast.success("تم إنشاء كلمة مرور جديدة وحفظها");
+      setForgotPasswordOpen(false);
+      await loginMutation.mutateAsync({
+        identifier: resolvedIdentifier.identifier,
+        password: newPassword,
+      });
+      toast.success("تم تسجيل الدخول تلقائياً");
+      setLocation("/app");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر حفظ كلمة المرور الجديدة حالياً");
     }
   };
 
@@ -365,7 +399,7 @@ export default function Home() {
           <DialogHeader>
             <DialogTitle>استرجاع كلمة المرور</DialogTitle>
             <DialogDescription>
-              سيتم إرسال رمز تحقق إلى وسيلة التواصل المكتوبة حالياً، سواء رقم الجوال أو البريد الإلكتروني، وبعد إدخاله سنجلب كلمة المرور المؤقتة المحفوظة في قاعدة البيانات لتكون قابلة للنسخ.
+              سيتم إرسال رمز تحقق إلى وسيلة التواصل المكتوبة حالياً. بعد تأكيد الرمز سيظهر فورم إنشاء كلمة مرور جديدة، وبعد الحفظ سيتم تسجيل الدخول مباشرة.
             </DialogDescription>
           </DialogHeader>
 
@@ -402,24 +436,39 @@ export default function Home() {
                   type="button"
                   variant="outline"
                   onClick={handleVerifyRecoveryCode}
-                  disabled={forgotPasswordVerifyMutation.isPending}
+                  disabled={forgotPasswordVerifyMutation.isPending || recoveryStep === "verified"}
                   className="w-full"
                 >
-                  {forgotPasswordVerifyMutation.isPending ? "جارٍ جلب كلمة المرور..." : "تأكيد الرمز"}
+                  {forgotPasswordVerifyMutation.isPending ? "جارٍ التحقق من الرمز..." : recoveryStep === "verified" ? "تم تأكيد الرمز" : "تأكيد الرمز"}
                 </Button>
               </div>
             )}
 
-            {recoveryStep === "verified" && temporaryPassword && (
+            {recoveryStep === "verified" && (
               <div className="space-y-3 rounded-2xl border border-primary/30 bg-primary/5 p-4">
-                <p className="text-sm font-semibold">كلمة المرور المؤقتة من قاعدة البيانات</p>
-                <div className="flex items-center gap-2">
-                  <Input value={temporaryPassword} readOnly className="h-11 font-mono" />
-                  <Button type="button" variant="secondary" onClick={handleCopyPassword}>
-                    <Copy className="h-4 w-4" />
-                    نسخ
-                  </Button>
-                </div>
+                <p className="text-sm font-semibold">أنشئ كلمة مرور جديدة</p>
+                <Input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="كلمة المرور الجديدة"
+                  className="h-11 text-base"
+                />
+                <Input
+                  type="password"
+                  value={confirmNewPassword}
+                  onChange={(e) => setConfirmNewPassword(e.target.value)}
+                  placeholder="تأكيد كلمة المرور الجديدة"
+                  className="h-11 text-base"
+                />
+                <Button
+                  type="button"
+                  onClick={handleCompletePasswordReset}
+                  disabled={forgotPasswordCompleteMutation.isPending || loginMutation.isPending}
+                  className="w-full"
+                >
+                  {forgotPasswordCompleteMutation.isPending || loginMutation.isPending ? "جارٍ الحفظ وتسجيل الدخول..." : "حفظ كلمة المرور الجديدة"}
+                </Button>
               </div>
             )}
           </div>
